@@ -1,7 +1,33 @@
-# Kancil — Agent Browser + DevTools untuk Termux
+<p align="center">
+  <img src="assets/logo.png" width="160" alt="Logo Kancil">
+</p>
 
-Browser CLI yang bisa dipakai agent sebagai **browser automation + DevTools +
-scraper + inspection tool** secara native, terstruktur, dan agent-friendly.
+<h1 align="center">Kancil</h1>
+
+<p align="center">
+  <b>Agent browser seukuran saku.</b><br>
+  Kecil tapi cerdik — seperti kancil di cerita rakyat.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-3.11.0-brightgreen" alt="version">
+  <img src="https://img.shields.io/badge/tests-143%20unit%20%2B%205%20live-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/size-%7E100%20KB-blue" alt="size">
+  <img src="https://img.shields.io/badge/dependencies-0-blue" alt="zero deps">
+  <img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="python">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="license">
+  <a href="README.md"><img src="https://img.shields.io/badge/README-English-blue" alt="english"></a>
+</p>
+
+> Browser CLI yang bisa dipakai agent sebagai **browser automation + DevTools +
+> scraper + inspection tool** secara native, terstruktur, dan agent-friendly.
+> **~100 KB, nol dependency.** Jalan di Termux Android (ARM64), Linux, macOS.
+
+```bash
+pip install -e .
+kancil open https://example.com --quiet
+kancil scrape https://news.ycombinator.com --auto --max-items 10
+```
 
 ## Install
 
@@ -9,7 +35,7 @@ scraper + inspection tool** secara native, terstruktur, dan agent-friendly.
 ```bash
 cd ~/workspace/kancil        # atau di mana pun kamu unzip
 pip install -e .             # di Termux: pip install -e . --break-system-packages
-kancil --version              # kancil 3.1.0
+kancil --version              # kancil 3.11.0
 kancil open https://example.com --quiet
 ```
 
@@ -25,7 +51,7 @@ python3 -m kancil open https://example.com --quiet
 **Nol dependency** untuk engine default (pure Python stdlib).
 Jalan di Termux Android (ARM64), Linux, macOS.
 
-> Nama *Kancil* dari cerita rakyat: kecil tapi cerdik — browser 384 KB
+> Nama *Kancil* dari cerita rakyat: kecil tapi cerdik — browser ~100 KB
 > yang ngalahin browser ratusan MB untuk kerjaan agent.
 
 ```
@@ -42,7 +68,7 @@ kancil/                        # project root
     devtools.py                # scraper, reader/extract, network/perf helpers
     session.py                 # persistent state (~/.kancil/)
     repl.py                    # kancil shell  (REPL interaktif)
-  tests/                       # 88 unit+integration test (stdlib unittest)
+  tests/                       # 143 unit test + 5 live test (stdlib unittest)
 ```
 
 ## Dua engine, satu API
@@ -356,11 +382,11 @@ cd ~/workspace/kancil
 python3 -m unittest tests.test_browser -v
 ```
 
-88 test: navigation, back/forward, tabs, lazy restore, DOM, CSS, XPath,
+143 test: navigation, back/forward, tabs, lazy restore, DOM, CSS, XPath,
 inspector, smart resolve, klik/type/submit form, upload file, form auto-fill,
-cookies, storage, network + HAR, HTTP errors, scraper, extract, perf,
-download, bookmark, profile, proxy, UA, bentuk JSON, capabilities,
-error handling.
+cookies, storage, network + HAR, HTTP errors, scraper, extract, structured
+data, sitemap, HTTP cache, perf, download, bookmark, profile, proxy, UA,
+bentuk JSON, capabilities, error handling, X.509/CA pure-Python.
 
 ## Batasan yang diketahui
 
