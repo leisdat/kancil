@@ -79,7 +79,7 @@ screenshots, PDF, request blocking. Same API.
 
 ```bash
 # Termux / Linux / macOS — zero dependencies
-git clone https://github.com/<you>/kancil && cd kancil
+git clone https://github.com/leisdat/kancil && cd kancil
 pip install -e .                      # or: python3 -m kancil (from repo root)
 
 kancil open https://news.ycombinator.com --quiet
