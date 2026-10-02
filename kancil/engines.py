@@ -627,7 +627,7 @@ class StaticEngine:
             pass
         return raw
 
-    def fetch(self, url, data=None, timeout=None, extra_headers=None):
+    def fetch(self, url, data=None, timeout=None, extra_headers=None, method=None):
         import datetime
         timeout = timeout or self.timeout
         last_err = None
@@ -639,10 +639,11 @@ class StaticEngine:
             use_cache = self.cache_enabled and not data
             if use_cache:
                 headers.update(httpcache.conditional_headers(url))
-            req = urllib.request.Request(url, data=data, headers=headers)
+            req = urllib.request.Request(url, data=data, headers=headers,
+                                         method=method)
             entry = {"t": time.strftime("%H:%M:%S"),
                      "started": datetime.datetime.now().isoformat(timespec="seconds"),
-                     "method": "POST" if data else "GET",
+                     "method": method or ("POST" if data else "GET"),
                      "url": url, "status": "ERR", "ctype": "-", "size": 0,
                      "ms": 0, "req_headers": dict(req.header_items()), "res_headers": {},
                      "query": parse_query_params(url),
