@@ -41,7 +41,7 @@ user**.
 |---|---|---|
 | Install size | **106 KB, 0 deps** | 150 MB+ browser download |
 | Runs on Termux Android | ✅ | ❌ (needs proot hacks) |
-| Agent interface | Native: 65 JSON actions | You write the wrapper |
+| Agent interface | Native: 68 JSON actions | You write the wrapper |
 | Sees JS-rendered pages | ✅ via injected agent | ✅ |
 | Drives your real phone browser | ✅ proxy + agent.js | ❌ |
 | Honest capability reporting | ✅ `devtools --json` | — |
@@ -57,7 +57,7 @@ redaction on by default, header inspection.
 **Scraper** — pagination (numbered/next/infinite-scroll), dedup, robots.txt,
 `extract` (article/links/images/tables).
 
-**Agent Tool Interface** — 65 actions, JSON-in/JSON-out, structured error
+**Agent Tool Interface** — 68 actions, JSON-in/JSON-out, structured error
 codes (`ELEMENT_NOT_FOUND`, `TIMEOUT`, …). Built for LLM agents.
 
 **YouTube kit** — `yt-search` (via `ytInitialData`, no JS needed), `yt-video`
