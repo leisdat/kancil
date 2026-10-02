@@ -2183,3 +2183,188 @@ class DaemonTest(unittest.TestCase):
         r = dm.start()
         self.assertTrue(r["success"])
         self.assertEqual(r["status"], "already running")
+
+
+class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
+    """Mock of the Kancil Browser APK agent HTTP API."""
+    PAGE = (b"<html><head><title>WV Test</title></head><body>"
+            b"<h1>Hi</h1><a href='https://example.com/x'>go</a>"
+            b"<button id='b1'>Klik</button>"
+            b"<input name='q' type='text'></body></html>")
+    PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+    TABS = [{"id": 1, "url": "https://example.com/",
+             "title": "WV Test", "active": True}]
+
+    def log_message(self, *a):
+        pass
+
+    def _json(self, o):
+        b = json.dumps(o).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def _err(self, code, msg):
+        b = json.dumps({"ok": False, "error": msg}).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def do_GET(self):
+        p = self.path.split("?")[0]
+        if p == "/status":
+            self._json({"ok": True, "agent": "mock",
+                        "url": "https://example.com/",
+                        "title": "WV Test", "network_count": 1,
+                        "tab": 1, "tab_count": len(self.TABS)})
+        elif p == "/tabs":
+            self._json({"ok": True, "tabs": self.TABS, "active": 1})
+        elif p == "/dom":
+            self._json({"ok": True, "html": self.PAGE.decode()})
+        elif p == "/network":
+            self._json({"ok": True, "requests": [
+                {"id": 1, "t": "06:00:00", "method": "GET",
+                 "url": "https://example.com/", "status": 200}]})
+        elif p == "/cookies":
+            self._json({"ok": True,
+                        "cookies": [{"name": "sid", "value": "abc"}]})
+        elif p == "/screenshot":
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(self.PNG)))
+            self.end_headers()
+            self.wfile.write(self.PNG)
+        elif p in ("/back", "/forward", "/reload"):
+            self._json({"ok": True})
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        p = self.path.split("?")[0]
+        n = int(self.headers.get("Content-Length", 0) or 0)
+        body = json.loads(self.rfile.read(n) or b"{}")
+        if p == "/navigate":
+            self._json({"ok": True, "url": body.get("url")})
+        elif p == "/js":
+            expr = body.get("expr", "")
+            if "querySelectorAll" in expr:
+                self._json({"ok": True,
+                            "result": "0" if "nope" in expr else "1"})
+            else:
+                self._json({"ok": True, "result": "null"})
+        elif p == "/click":
+            self._json({"ok": True, "result": "clicked"})
+        elif p == "/type":
+            self._json({"ok": True, "result": "typed"})
+        elif p == "/network/clear":
+            self._json({"ok": True})
+        elif p == "/tabs/new":
+            t = {"id": 2, "url": body.get("url", ""),
+                 "title": "New", "active": True}
+            self._json({"ok": True, "tab": t})
+        elif p == "/tabs/activate":
+            if body.get("id") in ("1", "2"):
+                self._json({"ok": True})
+            else:
+                self._err(404, "no such tab")
+        elif p == "/tabs/close":
+            if body.get("id") == "2":
+                self._json({"ok": True})
+            else:
+                self._err(400, "cannot close the last tab")
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
+class WebViewEngineTest(unittest.TestCase):
+    """webview engine — drives the Kancil Browser APK agent API."""
+
+    @classmethod
+    def setUpClass(cls):
+        from kancil.webview_engine import WebViewEngine
+        cls.port = free_port()
+        cls.srv = http.server.HTTPServer(("127.0.0.1", cls.port),
+                                         WebViewAgentHandler)
+        cls.th = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.th.start()
+        cls.eng = WebViewEngine(port=cls.port, timeout=10)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
+    def test_unreachable_fails_fast(self):
+        from kancil.webview_engine import WebViewEngine
+        from kancil.engines import EngineError
+        with self.assertRaises(EngineError) as cm:
+            WebViewEngine(port=free_port(), timeout=2)
+        self.assertIn("Kancil Browser", str(cm.exception))
+
+    def test_capabilities(self):
+        c = self.eng.capabilities
+        self.assertTrue(c["javascript"])
+        self.assertTrue(c["screenshot"])
+        self.assertTrue(c["video"])
+        self.assertTrue(c["cookies"])
+
+    def test_open_and_page(self):
+        r = self.eng.open("example.com")
+        self.assertTrue(r["success"], r)
+        p = self.eng.page
+        self.assertIsNotNone(p.dom)
+        self.assertEqual(p.title, "WV Test")
+        self.assertEqual(len(p.links), 1)
+
+    def test_actions(self):
+        self.assertTrue(self.eng.click("#b1")["success"])
+        self.assertTrue(self.eng.type("input[name=q]", "halo")["success"])
+        self.assertTrue(self.eng.resolve("#b1")["success"])
+        self.assertFalse(self.eng.resolve("#nope")["success"])
+        self.assertTrue(self.eng.evaluate("1+1")["success"])
+        self.assertTrue(self.eng.scroll("bottom")["success"])
+        self.assertTrue(self.eng.back()["success"])
+
+    def test_screenshot_cookies_network(self):
+        d = tempfile.mkdtemp()
+        try:
+            s = self.eng.screenshot(
+                path=os.path.join(d, "s.png"))
+            self.assertTrue(s["success"], s)
+            with open(os.path.join(d, "s.png"), "rb") as f:
+                self.assertEqual(f.read(8), b"\x89PNG\r\n\x1a\n")
+            c = self.eng.cookies()
+            self.assertEqual(c[0]["name"], "sid")
+            n = self.eng.network(limit=10)
+            self.assertEqual(n[0]["status"], 200)
+            self.assertTrue(self.eng.network_clear()["success"])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_kancil_api_routes_webview(self):
+        b = Kancil(engine="webview", webview_port=self.port, timeout=10)
+        self.assertEqual(b._engine_name, "webview")
+        self.assertTrue(b.capabilities["javascript"])
+        r = b.open("example.com")
+        self.assertTrue(r["success"], r)
+        # default port 8080 without the app running must fail fast, not hang
+        from kancil.engines import EngineError
+        with self.assertRaises(EngineError):
+            Kancil(engine="webview", webview_port=free_port(), timeout=2)
+
+    def test_tabs(self):
+        tabs = self.eng.list_tabs()
+        self.assertEqual(len(tabs), 1)
+        self.assertTrue(tabs[0]["current"])
+        r = self.eng.new_tab("https://example.org/")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["tab"], 2)
+        self.assertTrue(self.eng.switch_tab(1)["success"])
+        self.assertFalse(self.eng.switch_tab(99)["success"])
+        self.assertTrue(self.eng.close_tab(2)["success"])
+        self.assertFalse(self.eng.close_tab(1)["success"])  # last tab

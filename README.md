@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.13.0-brightgreen" alt="version">
+  <img src="https://img.shields.io/badge/version-3.14.0-brightgreen" alt="version">
   <img src="https://img.shields.io/badge/tests-150%20unit%20%2B%205%20live-brightgreen" alt="tests">
   <img src="https://img.shields.io/badge/size-%7E100%20KB-blue" alt="size">
   <img src="https://img.shields.io/badge/dependencies-0-blue" alt="zero deps">
@@ -77,6 +77,11 @@ call; `network_curl` replays any logged request as curl.
 **🧩 Playwright engine (optional)** — real Chromium for full JS,
 screenshots, PDF. Same API. Auto-detects Camoufox on Termux.
 
+**📱 WebView engine (new)** — `--engine webview` drives the
+**Kancil Browser** Android app (`android/`, ~24 KB APK) on the same phone:
+real Chromium via System WebView. Log in / solve captchas once in the app,
+the Termux agent reuses that live session.
+
 ## Quickstart
 
 ```bash
@@ -108,6 +113,9 @@ kancil serve-proxy --mitm             # set WiFi proxy -> 127.0.0.1:8080
 kancil daemon start                   # start once
 kancil open https://example.com       # auto-routed through the daemon
 kancil daemon stop                    # stop it (state is saved)
+
+# drive the phone's real browser app (install android/kancil-browser.apk first)
+kancil open --engine webview https://example.com
 
 # watch YouTube, mini style
 kancil yt-play "termux tutorial" --port 8901

@@ -1,6 +1,6 @@
 """Kancil CLI.
 
-Usage: python -m browser <command> [args] [--json] [--engine static|playwright]
+Usage: python -m browser <command> [args] [--json] [--engine static|playwright|webview]
 
 State persists in ~/.kancil/state.json across invocations.
 """
@@ -98,7 +98,7 @@ def _common_flags(ap, suppress=False):
     ap.add_argument("--json", action="store_true", default=d, help="JSON output (agent-friendly)")
     ap.add_argument("--quiet", action="store_true", default=d, help="one-line ok/fail")
     ap.add_argument("--raw", action="store_true", default=d, help="raw data only")
-    ap.add_argument("--engine", choices=["static", "playwright"],
+    ap.add_argument("--engine", choices=["static", "playwright", "webview"],
                     default=argparse.SUPPRESS if suppress else None)
     ap.add_argument("--pw-browser", choices=["chromium", "firefox", "webkit"],
                     default=argparse.SUPPRESS if suppress else None,

@@ -1,5 +1,35 @@
 # Changelog — Kancil
 
+## 3.14.0 (2026-10-03)
+
+Kancil Browser: aplikasi Android pendamping + engine `webview`.
+
+### Added
+- **Kancil Browser APK** (`android/`, ~24 KB, signed): browser berbasis
+  System WebView (Chromium beneran) dengan agent HTTP server di
+  `127.0.0.1:8080` — navigate/dom/js/click/type/network/cookies/screenshot,
+  network log ala DevTools, pill status + toast aktivitas agent.
+  Build tanpa Gradle: `./build.sh` (aapt2 + d8 langsung).
+- **Engine `webview`** (`kancil/webview_engine.py`): `Kancil(engine="webview")`
+  / `kancil open --engine webview …` — nyetir aplikasi di HP yang sama
+  lewat HTTP API-nya. Login/captcha cukup sekali di app, agent di Termux
+  pakai session-nya terus (JS, video, screenshot, localStorage beneran).
+  Gagal cepat dengan pesan jelas kalau app belum dibuka.
+- `Kancil(..., webview_host=, webview_port=)` — override alamat agent.
+- **Multi-tab** di app + engine: tiap tab WebView + network log sendiri,
+  counter tab + dialog switcher di toolbar, agent API
+  `/tabs /tabs/new /tabs/activate /tabs/close`.
+- **Pilihan search engine** (Google/DuckDuckGo/Brave/Bing) di pengaturan —
+  kalau SafeSearch Google dikunci jaringan, pindah engine solusinya.
+- **Adblock ringan** (20 pola host iklan/tracker, di-log sebagai
+  `blocked:adblock`), **reader mode** (tombol + `POST /reader`),
+  **download manager**, **hemat data** (blokir gambar), **situs desktop**
+  (toggle UA), **mode malam** (CSS filter), **cari di halaman**.
+
+### Notes
+- 156 unit tests hijau (6 baru: mock agent server — open/page/actions/
+  screenshot/cookies/network, fail-fast, routing API).
+
 ## 3.13.0 (2026-10-03)
 
 Daemon mode: satu proses persistent, nol biaya startup per command.

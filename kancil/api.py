@@ -32,7 +32,8 @@ class Kancil:
     def __init__(self, engine="static", timeout=25, retries=2,
                  cookie_file=None, profile=None, proxy=None, ua=None,
                  pw_session=None, pw_browser="chromium",
-                 pw_executable_path=None, cache=True):
+                 pw_executable_path=None, cache=True,
+                 webview_host=None, webview_port=None):
         self.profile = profile or {}
         self.proxy = proxy
         self.ua = ua
@@ -40,6 +41,8 @@ class Kancil:
         self.pw_session = pw_session
         self.pw_browser = pw_browser
         self.pw_executable_path = pw_executable_path
+        self.webview_host = webview_host
+        self.webview_port = webview_port
         self.bookmarks = []
         self._bm_id = 0
         self._engine_name = engine
@@ -59,6 +62,14 @@ class Kancil:
                                     storage_state=storage_state,
                                     browser=self.pw_browser,
                                     executable_path=self.pw_executable_path)
+        if name == "webview":
+            from .webview_engine import WebViewEngine
+            kw = {"timeout": timeout}
+            if self.webview_host:
+                kw["host"] = self.webview_host
+            if self.webview_port:
+                kw["port"] = self.webview_port
+            return WebViewEngine(**kw)
         return engines.StaticEngine(timeout=timeout, retries=retries,
                                     cookie_file=cookie_file,
                                     proxy=self.proxy,
