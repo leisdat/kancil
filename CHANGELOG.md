@@ -1,5 +1,25 @@
 # Changelog — Kancil
 
+## 3.8.0 (2026-10-02)
+
+Menutup temuan sesi: `--session` sekarang persisten beneran + `open`
+bisa nunggu hydrate.
+
+### Added
+- `--session NAME` sekarang load storage_state di awal DAN save otomatis
+  saat command selesai (sebelumnya cuma load — cookie hasil challenge
+  mati bareng browser). Alur Reddit:
+  `kancil --engine playwright --pw-browser firefox --session reddit
+  open https://www.reddit.com/ --wait-ms 8000`
+  lalu command berikutnya dengan `--session reddit` mewarisi cookie.
+- `open --wait-ms N`: tunggu N ms setelah load (playwright: kasih waktu
+  JS hydrate sebelum query).
+- Playwright auto `--no-sandbox` saat jalan sebagai root (docker/proot).
+
+### Notes
+- `kancil repl --engine playwright` tetap cara terbaik untuk sesi
+  interaktif panjang: satu browser, banyak command.
+
 ## 3.7.0 (2026-10-02)
 
 Anti-bot hygiene (jujur): mengurangi sinyal bot untuk deteksi naif +

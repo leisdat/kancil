@@ -110,6 +110,12 @@ class PlaywrightEngine(engines.StaticEngine):
                 executable_path = find_camoufox_binary()
             if executable_path:
                 launch_kw["executable_path"] = executable_path
+            # root (docker, proot) can't use Chromium's sandbox
+            try:
+                if os.geteuid() == 0:
+                    launch_kw["args"] = ["--no-sandbox"]
+            except AttributeError:
+                pass  # non-POSIX
             env = _browser_env()
             if env is not None:
                 launch_kw["env"] = env

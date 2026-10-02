@@ -41,6 +41,15 @@ def put_browser(b, st, args):
         new_st["timeout"] = st.get("timeout", 25)
         new_st["retries"] = st.get("retries", 2)
         session_mod.save_state(new_st)
+        # --session NAME means a *persistent* session: save playwright's
+        # storage_state (cookies, localStorage) so the next command —
+        # even a fresh browser process — resumes where this one left off
+        # (e.g. a solved JS challenge stays solved).
+        if b._engine_name == "playwright" and getattr(b, "pw_session", None):
+            try:
+                b.session_save(b.pw_session)
+            except Exception:
+                pass
     finally:
         b.close()
 
@@ -104,7 +113,8 @@ def _common_flags(ap, suppress=False):
     ap.add_argument("--ua", default=argparse.SUPPRESS if suppress else None,
                     help="User-Agent override (persists in session)")
     ap.add_argument("--session", default=argparse.SUPPRESS if suppress else None,
-                    help="named session (playwright storage_state)")
+                    help="named persistent session: playwright storage_state "
+                         "is loaded at start and saved at exit")
     return ap
 
 
@@ -123,6 +133,8 @@ def build_parser():
     SP("shell", help="interactive REPL")
     sp = SP("open", help="open URL")
     sp.add_argument("url")
+    sp.add_argument("--wait-ms", type=int, default=0,
+                    help="wait N ms after load (playwright: lets JS hydrate)")
     SP("back", help="go back")
     SP("fwd", help="go forward")
     SP("reload", help="reload page")
@@ -388,7 +400,13 @@ def main(argv=None):
 def dispatch(b, args):
     c = args.cmd
     if c == "open":
-        return b.open(args.url)
+        r = b.open(args.url)
+        wait_ms = getattr(args, "wait_ms", 0) or 0
+        if wait_ms > 0 and r.get("success"):
+            import time as _t
+            _t.sleep(wait_ms / 1000.0)
+            r["waited_ms"] = wait_ms
+        return r
     if c == "back":
         return b.back()
     if c == "fwd":

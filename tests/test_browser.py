@@ -1660,5 +1660,66 @@ class AntiBotTest(unittest.TestCase):
         self.assertFalse(r["success"])
 
 
+class SessionPersistTest(unittest.TestCase):
+    """v3.8.0: --wait-ms on open, --session auto-save on exit."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.port = free_port()
+        cls.srv = http.server.HTTPServer(("127.0.0.1", cls.port), Handler)
+        cls.th = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.th.start()
+        cls.base = "http://127.0.0.1:%d" % cls.port
+        cls.tmp = tempfile.mkdtemp()
+        os.environ["HOME"] = cls.tmp
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
+    def test_open_wait_ms(self):
+        import argparse
+        import time
+        from kancil import Kancil, cli
+        b = Kancil(engine="static", timeout=10, retries=0)
+        try:
+            ns = argparse.Namespace(cmd="open", url=self.base + "/",
+                                    wait_ms=600)
+            t0 = time.time()
+            r = cli.dispatch(b, ns)
+            dt = time.time() - t0
+            self.assertTrue(r["success"], r)
+            self.assertEqual(r.get("waited_ms"), 600)
+            self.assertGreaterEqual(dt, 0.5)
+        finally:
+            b.close()
+
+    def test_open_no_wait_by_default(self):
+        import argparse
+        from kancil import Kancil, cli
+        b = Kancil(engine="static", timeout=10, retries=0)
+        try:
+            ns = argparse.Namespace(cmd="open", url=self.base + "/")
+            r = cli.dispatch(b, ns)
+            self.assertTrue(r["success"], r)
+            self.assertNotIn("waited_ms", r)
+        finally:
+            b.close()
+
+    def test_put_browser_autosaves_pw_session(self):
+        # static engine has no storage_state; put_browser must not crash
+        # and must not create a session dir for it
+        import argparse
+        from kancil import Kancil, cli
+        from kancil import session as session_mod
+        b = Kancil(engine="static", timeout=10, retries=0)
+        b.pw_session = "staticsess"
+        try:
+            cli.put_browser(b, {}, argparse.Namespace())
+        finally:
+            pass
+        self.assertFalse(os.path.exists(session_mod.pw_state_path("staticsess")))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
