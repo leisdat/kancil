@@ -1498,5 +1498,104 @@ class MoatTest(unittest.TestCase):
                 os.environ["HOME"] = old_home
 
 
+class KeepAliveTest(unittest.TestCase):
+    """v3.6.0: keep-alive pooling + netlog cap."""
+
+    @classmethod
+    def setUpClass(cls):
+        class H11(Handler):
+            protocol_version = "HTTP/1.1"
+        cls.port = free_port()
+        cls.srv = http.server.HTTPServer(("127.0.0.1", cls.port), H11)
+        cls.th = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.th.start()
+        cls.base = "http://127.0.0.1:%d" % cls.port
+        cls.tmp = tempfile.mkdtemp()
+        os.environ["HOME"] = cls.tmp
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
+    def _ka_handler(self, engine):
+        from kancil import engines
+        for h in engine.opener.handlers:
+            if isinstance(h, engines._KeepAliveHTTPHandler):
+                return h
+        return None
+
+    def test_pool_reuses_connection(self):
+        from kancil import Kancil
+        b = Kancil(engine="static", timeout=10, retries=0)
+        try:
+            h = self._ka_handler(b.engine)
+            self.assertIsNotNone(h, "keep-alive handler not installed")
+            created = []
+            orig = h._pool_get
+
+            def counting(*a, **k):
+                conn, key, fresh = orig(*a, **k)
+                created.append(fresh)
+                return conn, key, fresh
+
+            h._pool_get = counting
+            try:
+                for i in range(5):
+                    r = b.open(self.base + "/")
+                    self.assertTrue(r["success"], r)
+            finally:
+                h._pool_get = orig
+            # first request builds the connection, rest reuse it
+            self.assertEqual(created, [True, False, False, False, False],
+                             created)
+        finally:
+            b.close()
+
+    def test_stale_connection_heals(self):
+        import http.client
+        import urllib.request
+        from kancil import engines
+        h = engines._KeepAliveHTTPHandler()
+        # plant a dead-but-not-None socket in the pool: request() on it
+        # raises OSError, which must trigger the fresh-retry path
+        dead = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        dead.request("GET", "/")
+        dead.getresponse().read()
+        dead.sock.close()  # kill fd, keep attribute non-None
+        key = ("HTTPConnection", "127.0.0.1:%d" % self.port)
+        h._pool[key] = dead
+        op = urllib.request.build_opener(h)
+        try:
+            with op.open(self.base + "/", timeout=10) as r:
+                body = r.read()
+            self.assertIn(b"Welcome", body)
+        finally:
+            h.close_idle()
+
+    def test_no_pool_with_proxy(self):
+        from kancil import Kancil, engines
+        b = Kancil(engine="static", timeout=10, retries=0,
+                   proxy="http://127.0.0.1:9/")
+        try:
+            for h in b.engine.opener.handlers:
+                self.assertNotIsInstance(h, engines._KeepAliveHTTPHandler)
+                self.assertNotIsInstance(h, engines._KeepAliveHTTPSHandler)
+        finally:
+            b.close()
+
+    def test_netlog_capped(self):
+        from kancil import Kancil
+        b = Kancil(engine="static", timeout=10, retries=0)
+        try:
+            for _ in range(1005):
+                b.engine._log({"t": "t"})
+            self.assertEqual(len(b.engine.netlog), 1000)
+            # oldest dropped first: ids are the last 1000
+            self.assertEqual(b.engine.netlog[0]["id"], 6)
+            self.assertEqual(b.engine.netlog[-1]["id"], 1005)
+        finally:
+            b.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

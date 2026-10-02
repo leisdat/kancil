@@ -11,5 +11,5 @@ Agent API:
 """
 from .api import Kancil, ok, fail
 
-__version__ = "3.4.0"
+__version__ = "3.6.0"
 __all__ = ["Kancil", "ok", "fail", "__version__"]

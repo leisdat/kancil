@@ -1,5 +1,23 @@
 # Changelog — Kancil
 
+## 3.6.0 (2026-10-02)
+
+Optimasi: HTTP keep-alive pooling + batas memori netlog. Tetap 0 dependency.
+
+### Added
+- Keep-alive connection pooling di static engine: koneksi TCP/TLS dipakai
+  ulang per origin (sebelumnya tiap request buka koneksi baru — urllib
+  sengaja mematikan keep-alive). Stale connection otomatis di-drop dan
+  request di-retry sekali. Tidak aktif saat proxy dipakai (tunneling
+  punya semantik koneksi sendiri). `StaticEngine.close()` menutup
+  koneksi pool.
+- Netlog dibatasi 1000 entri terakhir (sebelumnya tak terbatas — sesi
+  scraping panjang bisa bengkak memori).
+
+### Fixed
+- `kancil.__version__` di-bump ke 3.6.0 (sebelumnya tertinggal di 3.4.0
+  walau CHANGELOG sudah 3.5.0).
+
 ## 3.5.0 (2026-10-02)
 
 Moat update: memperkuat yang Hermes tidak punya, menetralkan keunggulan

@@ -41,6 +41,173 @@ class EngineError(Exception):
     pass
 
 
+class _PooledResponse:
+    """http.client.HTTPResponse wrapper that returns the connection to the
+    pool on close() when the body was fully consumed and the server allows
+    keep-alive. Otherwise the connection is closed. All other attributes
+    delegate to the wrapped response."""
+
+    def __init__(self, r, conn, key, handler):
+        object.__setattr__(self, "_r", r)
+        object.__setattr__(self, "_conn", conn)
+        object.__setattr__(self, "_key", key)
+        object.__setattr__(self, "_handler", handler)
+        object.__setattr__(self, "_eof", False)
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "_r"), name)
+
+    def __setattr__(self, name, value):
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+        else:
+            setattr(object.__getattribute__(self, "_r"), name, value)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
+
+    def read(self, amt=None):
+        r = object.__getattribute__(self, "_r")
+        data = r.read() if amt is None else r.read(amt)
+        # read() with no arg, or fewer bytes than asked: hit EOF -> the
+        # connection is positioned for the next response and reusable.
+        if amt is None or len(data) < amt:
+            object.__setattr__(self, "_eof", True)
+        return data
+
+    def close(self):
+        r = object.__getattribute__(self, "_r")
+        conn = object.__getattribute__(self, "_conn")
+        try:
+            reusable = (object.__getattribute__(self, "_eof")
+                        and not r.will_close
+                        and getattr(conn, "sock", None) is not None)
+        except Exception:
+            reusable = False
+        try:
+            r.close()
+        finally:
+            if reusable:
+                object.__getattribute__(self, "_handler")._pool_put(
+                    object.__getattribute__(self, "_key"), conn)
+            else:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+
+class _KeepAliveMixin:
+    """urllib handler mixin: per-origin keep-alive connection pooling.
+
+    Mirrors AbstractHTTPHandler.do_open, except it does NOT force
+    "Connection: close" and does NOT kill the socket after the response.
+    A stale pooled connection is dropped and the request retried once on a
+    fresh connection. Only installed when no proxy is configured (proxy
+    tunneling has its own connection semantics).
+    """
+    _MAX_POOL = 16
+
+    def __init__(self, debuglevel=None):
+        self._pool = {}
+        self._pool_lock = threading.Lock()
+        super().__init__(debuglevel)
+
+    def _pool_get(self, http_class, host, timeout, http_conn_args):
+        key = (http_class.__name__, host)
+        with self._pool_lock:
+            h = self._pool.pop(key, None)
+        if h is not None and getattr(h, "sock", None) is None:
+            try:
+                h.close()
+            except Exception:
+                pass
+            h = None
+        fresh = h is None
+        if fresh:
+            h = http_class(host, timeout=timeout, **http_conn_args)
+        return h, key, fresh
+
+    def _pool_put(self, key, h):
+        with self._pool_lock:
+            if len(self._pool) >= self._MAX_POOL:
+                try:
+                    h.close()
+                except Exception:
+                    pass
+            else:
+                self._pool[key] = h
+
+    def close_idle(self):
+        """Close all pooled keep-alive connections."""
+        with self._pool_lock:
+            pool, self._pool = self._pool, {}
+        for h in pool.values():
+            try:
+                h.close()
+            except Exception:
+                pass
+
+    def do_open(self, http_class, req, **http_conn_args):
+        from urllib.error import URLError
+        host = req.host
+        if not host:
+            raise URLError('no host given')
+        if getattr(req, "_tunnel_host", None):
+            # tunneled (proxy CONNECT) connection: never pool
+            return super().do_open(http_class, req, **http_conn_args)
+        h, key, fresh = self._pool_get(http_class, host, req.timeout,
+                                       http_conn_args)
+        h.set_debuglevel(self._debuglevel)
+        headers = dict(req.unredirected_hdrs)
+        headers.update({k: v for k, v in req.headers.items()
+                        if k not in headers})
+        # NB: stdlib forces "Connection: close" here; we keep HTTP/1.1
+        # keep-alive so the socket survives for the next request.
+        headers.setdefault("Connection", "keep-alive")
+        headers = {name.title(): val for name, val in headers.items()}
+        for _ in range(2):
+            try:
+                h.request(req.get_method(), req.selector, req.data, headers,
+                          encode_chunked=req.has_header('Transfer-encoding'))
+            except OSError as err:
+                # probably a stale pooled connection: retry once fresh
+                try:
+                    h.close()
+                except Exception:
+                    pass
+                if not fresh:
+                    # stale pooled connection: retry once on a fresh one
+                    h = http_class(host, timeout=req.timeout, **http_conn_args)
+                    fresh = True
+                    continue
+                raise URLError(err)
+            break
+        try:
+            r = h.getresponse()
+        except Exception:
+            try:
+                h.close()
+            except Exception:
+                pass
+            raise
+        r.msg = r.reason
+        r.url = req.get_full_url()
+        return _PooledResponse(r, h, key, self)
+
+
+class _KeepAliveHTTPHandler(_KeepAliveMixin, urllib.request.HTTPHandler):
+    pass
+
+
+class _KeepAliveHTTPSHandler(_KeepAliveMixin, urllib.request.HTTPSHandler):
+    pass
+
+
 class Page:
     def __init__(self, url, status, raw, ctype):
         self.url = url
@@ -236,6 +403,10 @@ class StaticEngine:
         if self.proxy:
             handlers.append(urllib.request.ProxyHandler(
                 {"http": self.proxy, "https": self.proxy}))
+        else:
+            # no proxy: pool keep-alive connections per origin
+            handlers.append(_KeepAliveHTTPHandler())
+            handlers.append(_KeepAliveHTTPSHandler())
         self.opener = urllib.request.build_opener(*handlers)
 
     def set_proxy(self, url):
@@ -322,6 +493,9 @@ class StaticEngine:
         self._req_id += 1
         entry["id"] = self._req_id
         self.netlog.append(entry)
+        # cap memory on long sessions (oldest dropped first)
+        if len(self.netlog) > 1000:
+            del self.netlog[:len(self.netlog) - 1000]
         return entry
 
     @staticmethod
@@ -1090,6 +1264,14 @@ class StaticEngine:
             if hasattr(self.jar, "filename") and self.jar.filename:
                 self.jar.save(ignore_discard=True)
         except OSError:
+            pass
+        # drop pooled keep-alive connections
+        try:
+            for h in self.opener.handlers:
+                close_idle = getattr(h, "close_idle", None)
+                if close_idle:
+                    close_idle()
+        except Exception:
             pass
 
 
