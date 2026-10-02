@@ -1,5 +1,29 @@
 # Changelog — Kancil
 
+## 3.7.0 (2026-10-02)
+
+Anti-bot hygiene (jujur): mengurangi sinyal bot untuk deteksi naif +
+jembatan trust dari browser asli. Tetap 0 dependency.
+
+### Added
+- Browser-like default headers di static engine: `Accept`,
+  `Accept-Language`, `Accept-Encoding: gzip, deflate`,
+  `Upgrade-Insecure-Requests`, `Sec-Fetch-*` (bisa override via
+  extra_headers). Request "cuma User-Agent" adalah sinyal bot.
+- Dekompresi gzip/deflate otomatis (karena sekarang di-advertise).
+- `kancil cookies-import <file>` + tool action `cookies_import`:
+  import Netscape-format cookies.txt (hasil export dari browser asli).
+  Alur praktis: selesaikan challenge sekali di browser HP → export
+  cookie → static engine mewarisi sesi terpercaya.
+- `kancil agent cmd <tab> console` masuk ke pilihan CLI (sebelumnya
+  cuma bisa via tool JSON).
+
+### Notes
+- Reddit (`www.reddit.com`) masih menyajikan JS challenge page ke
+  static engine — itu batas arsitektur (challenge butuh eksekusi JS),
+  bukan bug. Jalur yang benar: Level 2 proxy (browser HP asli
+  menyelesaikan challenge secara native) atau cookies-import.
+
 ## 3.6.0 (2026-10-02)
 
 Optimasi: HTTP keep-alive pooling + batas memori netlog. Tetap 0 dependency.

@@ -376,6 +376,35 @@ class Kancil:
     def cookies(self):
         return ok(cookies=self.engine.cookies())
 
+    def cookies_import(self, path):
+        """Import cookies from a Netscape-format cookies.txt file
+        (as exported by browsers / extensions).
+
+        Practical anti-bot bridge: solve a challenge once in your real
+        browser, export its cookies, and the static engine inherits the
+        trusted session.
+        """
+        import http.cookiejar
+        mcj = http.cookiejar.MozillaCookieJar(path)
+        try:
+            mcj.load(ignore_discard=True, ignore_expires=True)
+        except Exception as e:
+            return fail("cannot load cookies file %r: %s" % (path, e))
+        jar = self.engine.jar
+        n = 0
+        for c in mcj:
+            try:
+                jar.set_cookie(c)
+                n += 1
+            except Exception:
+                pass
+        try:
+            if hasattr(jar, "filename") and jar.filename:
+                jar.save(ignore_discard=True)
+        except OSError:
+            pass
+        return ok(imported=n, file=path)
+
     def storage(self, kind="local"):
         data = self.engine.storage(kind)
         return ok(kind=kind, origin=self.engine._origin(),
@@ -1265,6 +1294,7 @@ Kancil._TOOL_ACTIONS = {
     "network_response": lambda s, p: s.network_response(int(p.get("id", -1))),
     "network_curl": lambda s, p: s.network_curl(int(p.get("id", -1))),
     "batch": lambda s, p: s.tool_batch(p),
+    "cookies_import": lambda s, p: s.cookies_import(p.get("file", "")),
     "har_export": lambda s, p: s.har_export(p.get("path", "network.har")),
     # storage
     "cookies": lambda s, p: s.cookies(),

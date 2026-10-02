@@ -325,7 +325,7 @@ def build_parser():
     ag_c.add_argument("tab")
     ag_c.add_argument("action",
                       choices=["click", "type", "scroll", "eval",
-                               "snapshot", "text"])
+                               "snapshot", "text", "console"])
     ag_c.add_argument("args", nargs="?", default="{}",
                       help='JSON args, e.g. \'{"selector":"a.x"}\'')
     ag_c.add_argument("--timeout", type=int, default=30)
@@ -335,6 +335,10 @@ def build_parser():
 
     SP("proxy-ca", help="generate MITM CA for serve-proxy "
                         "(install ca.crt on the phone once)")
+    ci = SP("cookies-import", help="import Netscape-format cookies.txt "
+                                   "(e.g. exported from your real browser) "
+                                   "into the static engine's jar")
+    ci.add_argument("file")
     px = SP("serve-proxy", help="level 2: local HTTP(S) proxy — your real "
                                 "browser's traffic goes through Kancil")
     px.add_argument("--port", type=int, default=8080)
@@ -699,6 +703,8 @@ def dispatch(b, args):
         print("Lalu: set proxy WiFi ke 127.0.0.1:8080 dan jalankan")
         print("`kancil serve-proxy --mitm`.")
         return {"success": True, "ca_crt": crt}
+    if c == "cookies-import":
+        return b.cookies_import(args.file)
     if c == "serve-proxy":
         from .proxy_server import ProxyServer, ca_fingerprint, ca_paths
         srv = ProxyServer(b, host=args.host, port=args.port,

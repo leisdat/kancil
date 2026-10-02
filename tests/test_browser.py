@@ -58,6 +58,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(b"ok", extra=[("Set-Cookie", "sess=abc123; Path=/")])
         elif self.path == "/json":
             self._send(b'{"hello":"world"}', "application/json")
+        elif self.path == "/gzip":
+            import gzip as _gz
+            raw = b"<html><body><h1>gzipped hi</h1></body></html>"
+            self._send(_gz.compress(raw), extra=[("Content-Encoding", "gzip")])
         elif self.path == "/slow404":
             self._send(b"nope", status=404)
         elif self.path.startswith("/shop"):
@@ -1595,6 +1599,65 @@ class KeepAliveTest(unittest.TestCase):
             self.assertEqual(b.engine.netlog[-1]["id"], 1005)
         finally:
             b.close()
+
+
+class AntiBotTest(unittest.TestCase):
+    """v3.6.0: browser-like headers, gzip, cookie import."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.port = free_port()
+        cls.srv = http.server.HTTPServer(("127.0.0.1", cls.port), Handler)
+        cls.th = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.th.start()
+        cls.base = "http://127.0.0.1:%d" % cls.port
+        cls.tmp = tempfile.mkdtemp()
+        os.environ["HOME"] = cls.tmp
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
+    def setUp(self):
+        self.b = Kancil(engine="static", timeout=10, retries=0)
+
+    def tearDown(self):
+        self.b.close()
+
+    def test_browser_headers_sent(self):
+        self.b.open(self.base + "/")
+        e = self.b.engine.netlog[-1]
+        h = {k.lower(): v for k, v in e.get("req_headers", {}).items()}
+        self.assertIn("accept", h)
+        self.assertIn("accept-language", h)
+        self.assertIn("accept-encoding", h)
+        self.assertIn("gzip", h["accept-encoding"])
+        self.assertIn("sec-fetch-dest", h)
+
+    def test_gzip_decoded(self):
+        r = self.b.open(self.base + "/gzip")
+        self.assertTrue(r["success"], r)
+        self.assertIn("gzipped hi", r.get("text", "") or
+                      self.b.engine.page.text)
+
+    def test_cookies_import(self):
+        # Netscape-format cookies.txt
+        p = os.path.join(self.tmp, "cookies.txt")
+        with open(p, "w") as f:
+            f.write("# Netscape HTTP Cookie File\n")
+            f.write("127.0.0.1\tFALSE\t/\tFALSE\t0\t"
+                    "imported_ck\thello123\n")
+        r = self.b.tool({"action": "cookies_import", "file": p})
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["imported"], 1)
+        # cookie is now in the jar and sent to the server
+        names = [c.name for c in self.b.engine.jar]
+        self.assertIn("imported_ck", names)
+
+    def test_cookies_import_bad_file(self):
+        r = self.b.tool({"action": "cookies_import",
+                         "file": "/nonexistent/x.txt"})
+        self.assertFalse(r["success"])
 
 
 if __name__ == "__main__":

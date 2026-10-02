@@ -509,6 +509,38 @@ class StaticEngine:
         except Exception:
             return "", trunc
 
+    # Browser-like request headers (anti-bot hygiene: a bare "User-Agent
+    # only" request is itself a bot signal). Callers can override via
+    # extra_headers.
+    BROWSER_HEADERS = {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                  "image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+    }
+
+    @staticmethod
+    def _decode_body(raw, encoding):
+        """Decompress gzip/deflate bodies (we advertise Accept-Encoding)."""
+        if not raw or not encoding:
+            return raw
+        enc = encoding.lower()
+        try:
+            if "gzip" in enc:
+                import gzip as _gz
+                return _gz.decompress(raw)
+            if "deflate" in enc:
+                import zlib as _zl
+                return _zl.decompress(raw)
+        except Exception:
+            pass
+        return raw
+
     def fetch(self, url, data=None, timeout=None, extra_headers=None):
         import datetime
         timeout = timeout or self.timeout
@@ -516,6 +548,7 @@ class StaticEngine:
         for attempt in range(self.retries + 1):
             t0 = time.time()
             headers = {"User-Agent": self.ua}
+            headers.update(self.BROWSER_HEADERS)
             headers.update(extra_headers or {})
             req = urllib.request.Request(url, data=data, headers=headers)
             entry = {"t": time.strftime("%H:%M:%S"),
@@ -538,6 +571,8 @@ class StaticEngine:
             try:
                 with self.opener.open(req, timeout=timeout) as r:
                     raw = r.read(8_000_000)
+                    enc = r.headers.get("Content-Encoding", "")
+                    raw = self._decode_body(raw, enc)
                     body, trunc = self._body_preview(raw)
                     entry.update({"url": r.geturl(), "status": r.status,
                                   "ctype": r.headers.get_content_type(), "size": len(raw),
@@ -554,6 +589,8 @@ class StaticEngine:
                 try:
                     entry["res_headers"] = dict(e.headers.items())
                     eb = e.read(32768)
+                    eb = self._decode_body(
+                        eb, e.headers.get("Content-Encoding", ""))
                     entry["res_body"], entry["res_truncated"] = self._body_preview(eb)
                 except Exception:
                     pass
