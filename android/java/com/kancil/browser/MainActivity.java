@@ -207,72 +207,88 @@ public class MainActivity extends Activity {
         }
     }
 
-    private Tab newTab(final String url, boolean background) {
+    private boolean isUiThread() {
+        return Looper.myLooper() == Looper.getMainLooper();
+    }
+
+    private Tab newTab(String url, boolean background) {
+        // Called from UI thread (onCreate, menu) AND agent worker threads.
+        // Never block the UI thread waiting for itself -> deadlock.
+        if (isUiThread()) return newTabUi(url, background);
         final AtomicReference<Tab> ref = new AtomicReference<>();
         final CountDownLatch latch = new CountDownLatch(1);
         ui.post(() -> {
-            WebView w = new WebView(MainActivity.this);
-            setupWebView(w);
-            final Tab tab = new Tab(++tabSeq, w);
-            tab.defaultUA = w.getSettings().getUserAgentString();
-            applyToggles(tab);
-            w.setWebViewClient(makeClient(tab));
-            w.setWebChromeClient(makeChrome(tab));
-            tabs.add(tab);
-            webContainer.addView(w, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT));
-            ref.set(tab);
+            ref.set(newTabUi(url, background));
             latch.countDown();
         });
         try { latch.await(15, TimeUnit.SECONDS); } catch (Exception ignored) {}
-        Tab tab = ref.get();
-        if (tab == null) return null;
-        if (!background) activateTab(tab.id);
-        else ui.post(() -> tab.web.setVisibility(View.GONE));
-        if (url != null) {
-            final String u = url;
-            ui.post(() -> tab.web.loadUrl(u));
-        }
-        ui.post(this::updateTabCount);
+        return ref.get();
+    }
+
+    /** Must run on the UI thread. */
+    private Tab newTabUi(String url, boolean background) {
+        WebView w = new WebView(MainActivity.this);
+        setupWebView(w);
+        Tab tab = new Tab(++tabSeq, w);
+        tab.defaultUA = w.getSettings().getUserAgentString();
+        applyToggles(tab);
+        w.setWebViewClient(makeClient(tab));
+        w.setWebChromeClient(makeChrome(tab));
+        tabs.add(tab);
+        webContainer.addView(w, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        if (!background) activateTabUi(tab.id);
+        else w.setVisibility(View.GONE);
+        if (url != null) w.loadUrl(url);
+        updateTabCount();
         return tab;
     }
 
     private void activateTab(int id) {
-        ui.post(() -> {
-            Tab t = findTab(id);
-            if (t == null) return;
-            if (active != null && active != t)
-                active.web.setVisibility(View.GONE);
-            active = t;
-            t.web.setVisibility(View.VISIBLE);
-            t.web.bringToFront();
-            urlBar.setText(t.web.getUrl());
-            if (!t.title.isEmpty()) setTitle(t.title);
-            updateTabCount();
-        });
+        if (isUiThread()) activateTabUi(id);
+        else ui.post(() -> activateTabUi(id));
+    }
+
+    /** Must run on the UI thread. */
+    private void activateTabUi(int id) {
+        Tab t = findTab(id);
+        if (t == null) return;
+        if (active != null && active != t)
+            active.web.setVisibility(View.GONE);
+        active = t;
+        t.web.setVisibility(View.VISIBLE);
+        t.web.bringToFront();
+        urlBar.setText(t.web.getUrl());
+        if (!t.title.isEmpty()) setTitle(t.title);
+        updateTabCount();
     }
 
     /** @return error message or null on success */
     private String closeTab(int id) {
+        if (isUiThread()) return closeTabUi(id);
         final AtomicReference<String> err = new AtomicReference<>();
         final CountDownLatch latch = new CountDownLatch(1);
         ui.post(() -> {
-            Tab t = findTab(id);
-            if (t == null) err.set("no such tab " + id);
-            else if (tabs.size() <= 1) err.set("cannot close the last tab");
-            else {
-                tabs.remove(t);
-                webContainer.removeView(t.web);
-                t.web.destroy();
-                if (active == t && !tabs.isEmpty())
-                    activateTab(tabs.get(tabs.size() - 1).id);
-                updateTabCount();
-            }
+            err.set(closeTabUi(id));
             latch.countDown();
         });
         try { latch.await(15, TimeUnit.SECONDS); } catch (Exception ignored) {}
         return err.get();
+    }
+
+    /** Must run on the UI thread. @return error or null */
+    private String closeTabUi(int id) {
+        Tab t = findTab(id);
+        if (t == null) return "no such tab " + id;
+        if (tabs.size() <= 1) return "cannot close the last tab";
+        tabs.remove(t);
+        webContainer.removeView(t.web);
+        t.web.destroy();
+        if (active == t && !tabs.isEmpty())
+            activateTabUi(tabs.get(tabs.size() - 1).id);
+        updateTabCount();
+        return null;
     }
 
     private String engineKey() {
