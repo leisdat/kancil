@@ -120,6 +120,9 @@ def _common_flags(ap, suppress=False):
                     default=argparse.SUPPRESS if suppress else False,
                     help="disable the static engine's HTTP cache "
                          "(ETag/Last-Modified revalidation)")
+    ap.add_argument("--local", action="store_true",
+                    default=argparse.SUPPRESS if suppress else False,
+                    help="bypass a running kancil daemon; run in this process")
     return ap
 
 
@@ -363,6 +366,11 @@ def build_parser():
 
     SP("proxy-ca", help="generate MITM CA for serve-proxy "
                         "(install ca.crt on the phone once)")
+    dm = SP("daemon", help="persistent background engine: zero per-command "
+                           "startup cost (warm DNS, keep-alive, cookies, tabs)")
+    dm.add_argument("action", nargs="?", default="status",
+                    choices=["start", "stop", "restart", "status"],
+                    help="default: status")
     ci = SP("cookies-import", help="import Netscape-format cookies.txt "
                                    "(e.g. exported from your real browser) "
                                    "into the static engine's jar")
@@ -387,6 +395,35 @@ def main(argv=None):
         from . import repl
         repl.run(engine=args.engine)
         return 0
+
+    # Daemon fast-path: a running daemon means one warm engine
+    # (DNS, keep-alive, cookies, tabs) — no per-command startup cost.
+    # Everything except long-lived/interactive commands routes through it.
+    if args.cmd not in ("daemon", "shell", "agent", "serve-proxy", "proxy-ca") \
+            and not getattr(args, "local", False):
+        from . import daemon as _dm
+        if _dm.alive():
+            if args.cmd == "tool" and not getattr(args, "payload", None) \
+                    and not sys.stdin.isatty():
+                args.payload = sys.stdin.read()
+            try:
+                rep = _dm.call({"op": "_dispatch", "args": vars(args),
+                                "cwd": os.getcwd()})
+            except Exception as e:
+                sys.stderr.write("daemon unreachable (%s); running locally\n"
+                                 % str(e)[:100])
+                rep = None
+            if rep is not None:
+                if rep.get("ok"):
+                    result = rep.get("result") or {
+                        "success": False, "errors": ["empty daemon reply"]}
+                else:
+                    result = {"success": False, "errors": [
+                        "daemon: %s" % rep.get("error", "unknown")]}
+                if result.get("_direct"):
+                    return 0
+                emit(result, args)
+                return 0 if result.get("success") else 1
 
     # The CLI is one-process-per-command: hold the state lock across the
     # whole load -> dispatch -> save cycle so parallel invocations can't
@@ -746,6 +783,25 @@ def dispatch(b, args):
         return {"success": True, "ca_crt": crt}
     if c == "cookies-import":
         return b.cookies_import(args.file)
+    if c == "daemon":
+        from . import daemon as _dm
+        act = args.action or "status"
+        if act == "status":
+            run = _dm.alive()
+            return {"success": True, "daemon": "running" if run else "stopped",
+                    "pid": _dm._read_pid(), "sock": _dm.sock_path()}
+        if act == "stop":
+            return _dm.stop()
+        # start / restart
+        if act == "restart":
+            _dm.stop()
+        return _dm.start(
+            engine=getattr(args, "engine", None) or "static",
+            proxy=getattr(args, "proxy", None),
+            ua=getattr(args, "ua", None),
+            timeout=getattr(args, "timeout", None) or 25,
+            retries=getattr(args, "retries", None) if getattr(
+                args, "retries", None) is not None else 2)
     if c == "serve-proxy":
         from .proxy_server import ProxyServer, ca_fingerprint, ca_paths
         srv = ProxyServer(b, host=args.host, port=args.port,

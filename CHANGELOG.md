@@ -1,5 +1,22 @@
 # Changelog — Kancil
 
+## 3.13.0 (2026-10-03)
+
+Daemon mode: satu proses persistent, nol biaya startup per command.
+
+### Added
+- `kancil daemon {start|stop|restart|status}` — background engine
+  (Unix socket `~/.kancil/daemon.sock`, protokol JSON, stdlib only).
+- Auto-route: kalau daemon jalan, semua command (`open`, `tool`, `dom`,
+  `network`, …) otomatis lewat daemon — engine tetap hangat (DNS cache,
+  keep-alive, cookies, tabs persist antar command). `--local` untuk
+  paksa jalan di proses sendiri.
+- Bonus: tabs/cookies sekarang persist antar invocasi CLI saat daemon aktif.
+- `fetch(..., method=...)` — PUT/PATCH/DELETE untuk kerja API.
+
+### Notes
+- 150 unit tests hijau (4 baru: daemon start/ping/dispatch/stop).
+
 ## 3.12.0 (2026-10-02)
 
 Network log setara DevTools: query params + cookies per request.

@@ -2117,3 +2117,69 @@ class NetCookiesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class DaemonTest(unittest.TestCase):
+    """v3.13.0: daemon mode — start/stop/status, dispatch routing."""
+
+    @classmethod
+    def setUpClass(cls):
+        from kancil import session as session_mod
+        from kancil import daemon as dm
+        cls._old_base = session_mod.BASE
+        cls._old_home = os.environ.get("HOME")
+        cls.tmp = tempfile.mkdtemp()
+        os.environ["HOME"] = cls.tmp
+        session_mod.BASE = os.path.join(cls.tmp, ".kancil")
+        cls.port = free_port()
+        cls.srv = http.server.HTTPServer(("127.0.0.1", cls.port), Handler)
+        cls.th = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.th.start()
+        r = dm.start()
+        assert r["success"], r
+
+    @classmethod
+    def tearDownClass(cls):
+        from kancil import session as session_mod
+        from kancil import daemon as dm
+        try:
+            dm.stop()
+        except Exception:
+            pass
+        session_mod.BASE = cls._old_base
+        if cls._old_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = cls._old_home
+        cls.srv.shutdown()
+
+    def test_ping(self):
+        from kancil import daemon as dm
+        self.assertTrue(dm.alive())
+
+    def test_dispatch_open(self):
+        from kancil import daemon as dm
+        rep = dm.call({"op": "_dispatch", "cwd": self.tmp,
+                       "args": {"cmd": "open",
+                                "url": "http://127.0.0.1:%d/" % self.port}},
+                      timeout=60)
+        self.assertTrue(rep.get("ok"), rep)
+        self.assertTrue(rep["result"].get("success"), rep["result"])
+
+    def test_cli_auto_route_and_local(self):
+        from kancil import cli as cli_mod
+        from kancil import daemon as dm
+        url = "http://127.0.0.1:%d/" % self.port
+        # routed through daemon: tab persists across CLI invocations
+        cli_mod.main(["open", "--json", url])
+        r = dm.call({"op": "_dispatch", "cwd": self.tmp,
+                     "args": {"cmd": "tabs"}}, timeout=30)
+        self.assertTrue(r["result"]["tabs"], r)
+        # --local bypasses the daemon (fresh local process state)
+        cli_mod.main(["--local", "open", "--json", url])
+
+    def test_double_start(self):
+        from kancil import daemon as dm
+        r = dm.start()
+        self.assertTrue(r["success"])
+        self.assertEqual(r["status"], "already running")

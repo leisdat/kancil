@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.12.0-brightgreen" alt="version">
-  <img src="https://img.shields.io/badge/tests-146%20unit%20%2B%205%20live-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/version-3.13.0-brightgreen" alt="version">
+  <img src="https://img.shields.io/badge/tests-150%20unit%20%2B%205%20live-brightgreen" alt="tests">
   <img src="https://img.shields.io/badge/size-%7E100%20KB-blue" alt="size">
   <img src="https://img.shields.io/badge/dependencies-0-blue" alt="zero deps">
   <img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="python">
@@ -382,7 +382,7 @@ cd ~/workspace/kancil
 python3 -m unittest tests.test_browser -v
 ```
 
-146 test: navigation, back/forward, tabs, lazy restore, DOM, CSS, XPath,
+150 test: navigation, back/forward, tabs, lazy restore, DOM, CSS, XPath,
 inspector, smart resolve, klik/type/submit form, upload file, form auto-fill,
 cookies, storage, network + HAR, HTTP errors, scraper, extract, structured
 data, sitemap, HTTP cache, perf, download, bookmark, profile, proxy, UA,
