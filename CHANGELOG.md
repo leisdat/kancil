@@ -1,5 +1,31 @@
 # Changelog — Kancil
 
+## 3.9.0 (2026-10-02)
+
+Scraper naik kelas: structured data, sitemap crawl, concurrent fetch.
+Lahir dari test scrape komiku.org.
+
+### Added
+- `structured` (tool action + `kancil structured`): ekstrak JSON-LD
+  (@graph di-flatten), OpenGraph, Twitter Card, dan meta
+  description/keywords/author. Data mesin-baca yang memang disediakan
+  situs — sering lebih bersih dari scraping teks visual.
+- `sitemap` (tool action + `kancil sitemap [url]`): daftar URL dari
+  sitemap.xml — via baris `Sitemap:` di robots.txt, fallback
+  `/sitemap.xml`. Mendukung sitemapindex (rekursi, depth<=2) dan .xml.gz.
+- `scrape --sitemap`: crawl pakai URL dari sitemap, bukan nebak
+  pagination (`?halaman=N`). Coverage penuh, halaman gagal (404) di-skip
+  tanpa membunuh crawl.
+- `scrape --sitemap --workers N`: fetch N halaman paralel (static engine,
+  max 8, tiap worker engine sendiri — thread-safe by isolation).
+  Contoh: `kancil scrape https://komiku.org/ --sitemap --selector h1
+  --fields title:h1 --pages 8 --workers 4`.
+
+### Notes
+- workers butuh sitemap (URL list diketahui di awal); pagination biasa
+  tetap sekuensial karena tiap halaman menemukan halaman berikutnya.
+- 132 unit tests hijau (9 baru).
+
 ## 3.8.0 (2026-10-02)
 
 Menutup temuan sesi: `--session` sekarang persisten beneran + `open`

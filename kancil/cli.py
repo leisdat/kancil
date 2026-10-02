@@ -221,6 +221,10 @@ def build_parser():
     sc.add_argument("--delay", type=float, default=1.0)
     sc.add_argument("--no-robots", action="store_true",
                     help="ignore robots.txt (not recommended)")
+    sc.add_argument("--sitemap", action="store_true",
+                    help="discover pages from sitemap.xml instead of pagination")
+    sc.add_argument("--workers", type=int, default=1,
+                    help="concurrent fetch workers (needs --sitemap, static only, max 8)")
 
     ex = SP("extract", help="reader mode")
     ex.add_argument("--mode", choices=["auto", "article", "links", "images", "tables"],
@@ -317,6 +321,10 @@ def build_parser():
     yv.add_argument("url")
 
     SP("page-json", help="extract JSON blobs embedded in the page HTML")
+    SP("structured", help="extract JSON-LD + OpenGraph/Twitter meta tags")
+    sm = SP("sitemap", help="list page URLs from sitemap.xml")
+    sm.add_argument("url", nargs="?")
+    sm.add_argument("--max-urls", type=int, default=5000, dest="max_urls")
 
     vw = SP("view", help="local viewer: see the page in your browser, "
                          "take over navigation (static) or live screen "
@@ -510,7 +518,12 @@ def dispatch(b, args):
                         max_items=args.max_items, timeout=args.crawl_timeout,
                         same_content_limit=args.same_content_limit,
                         scroll_pages=args.scroll_pages,
-                        respect_robots=not args.no_robots)
+                        respect_robots=not args.no_robots,
+                        sitemap=args.sitemap, workers=args.workers)
+    if c == "structured":
+        return b.structured()
+    if c == "sitemap":
+        return b.sitemap(url=args.url, max_urls=args.max_urls)
     if c == "extract":
         return b.extract(mode=args.mode)
     if c == "a11y":

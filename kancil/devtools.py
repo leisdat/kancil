@@ -230,6 +230,87 @@ def _page_number(url):
     return None
 
 
+def fetch_sitemap_urls(start_url, max_urls=5000, respect_robots=True):
+    """Discover page URLs from sitemap.xml.
+
+    Sources: robots.txt "Sitemap:" lines, then /sitemap.xml fallback.
+    Handles sitemapindex recursion (depth<=2) and .xml.gz. Pure sitemap
+    protocol parsing, no per-site rules.
+
+    Returns {"sitemaps": [...visited], "urls": [...], "truncated": bool}.
+    """
+    import gzip
+    import xml.etree.ElementTree as ET
+    u = urllib.parse.urlparse(start_url)
+    origin = "%s://%s" % (u.scheme or "https", u.netloc)
+    candidates = []
+    try:
+        req = urllib.request.Request(
+            origin + "/robots.txt", headers={"User-Agent": "kancil"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            txt = r.read(200000).decode("utf-8", errors="ignore")
+        for line in txt.splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line.lower().startswith("sitemap:"):
+                sm = line.split(":", 1)[1].strip()
+                if sm and sm not in candidates:
+                    candidates.append(sm)
+    except Exception:
+        pass
+    if origin + "/sitemap.xml" not in candidates:
+        candidates.append(origin + "/sitemap.xml")
+
+    seen_sm, sitemaps, urls = set(), [], []
+    truncated = False
+
+    def fetch_xml(sm_url, depth):
+        nonlocal truncated
+        if depth > 2 or sm_url in seen_sm:
+            return
+        if len(sitemaps) >= 50 or len(urls) >= max_urls:
+            truncated = True
+            return
+        seen_sm.add(sm_url)
+        if respect_robots and not robots_allowed(sm_url):
+            return
+        try:
+            req = urllib.request.Request(
+                sm_url, headers={"User-Agent": "kancil"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                if r.status != 200:
+                    return
+                data = r.read(3000000)
+            if sm_url.endswith(".gz"):
+                data = gzip.decompress(data)
+            root = ET.fromstring(data)
+        except Exception:
+            return
+        sitemaps.append(sm_url)
+        children = list(root)
+        locs = []
+        for c in children:
+            for loc in c.iter():
+                if loc.tag.endswith("loc") and (loc.text or "").strip():
+                    locs.append(loc.text.strip())
+                    break
+        is_index = any(c.tag.endswith("sitemap") for c in children)
+        if is_index:
+            for loc in locs:
+                fetch_xml(loc, depth + 1)
+        else:
+            for loc in locs:
+                if len(urls) >= max_urls:
+                    truncated = True
+                    break
+                urls.append(loc)
+
+    for cand in candidates:
+        fetch_xml(cand, 0)
+        if urls:
+            break
+    return {"sitemaps": sitemaps, "urls": urls, "truncated": truncated}
+
+
 def find_numbered_next(dom, base_url, current_url):
     """Find link to the next numbered page (?page=N+1 etc)."""
     cur = _page_number(current_url) or 1
@@ -279,8 +360,12 @@ def next_page_by_template(current_url):
 def paginate_scrape(engine, start_url, selector=None, fields=None, auto=False,
                     max_pages=10, max_items=1000, next_selector=None,
                     delay=1.0, timeout=180, same_content_limit=3,
-                    scroll_pages=0, respect_robots=True):
+                    scroll_pages=0, respect_robots=True, url_list=None):
     """Paginated scrape with duplicate detection and hard limits.
+
+    url_list: when given, iterate these URLs directly instead of following
+    next-page links (e.g. URLs discovered from a sitemap). max_pages caps
+    how many are fetched.
 
     Returns {"pages_crawled", "items", "duplicates", "failed_pages",
              "stopped_reason", "data"}.
@@ -290,8 +375,11 @@ def paginate_scrape(engine, start_url, selector=None, fields=None, auto=False,
     data, duplicates, failed = [], 0, 0
     pages_crawled, same_content = 0, 0
     stopped = "done"
-    url = start_url
-    via = "start"  # how the current url was discovered
+    url_iter = iter(url_list) if url_list else None
+    if url_iter is not None:
+        url, via = next(url_iter, None), "list"  # list mode: only the list
+    else:
+        url, via = start_url, "start"  # how the current url was discovered
 
     def page_items(p):
         if not p.dom:
@@ -344,6 +432,9 @@ def paginate_scrape(engine, start_url, selector=None, fields=None, auto=False,
                 stopped = "no-more-pages"
                 break
             failed += 1
+            if url_iter is not None:
+                url, via = next(url_iter, None), "list"  # advance before continue
+                continue  # list mode: skip bad URL, keep going
             stopped = "open-failed"
             break
         p = engine.page
@@ -370,27 +461,163 @@ def paginate_scrape(engine, start_url, selector=None, fields=None, auto=False,
             same_content = 0
 
         # next page?
-        nxt, via = None, "none"
-        if next_selector and p.dom:
-            els = select(p.dom, next_selector)
-            if els and els[0].get("href"):
-                nxt = urllib.parse.urljoin(p.url, els[0].get("href"))
-                via = "selector"
-        if not nxt and p.dom:
-            nxt = find_numbered_next(p.dom, p.url, p.url)
-            if nxt:
-                via = "numbered"
-        if not nxt:
-            nxt = next_page_by_template(p.url if hasattr(p, "url") else url)
-            if nxt:
-                via = "template"
-        url = nxt
+        if url_iter is not None:
+            url, via = next(url_iter, None), "list"
+        else:
+            nxt, via = None, "none"
+            if next_selector and p.dom:
+                els = select(p.dom, next_selector)
+                if els and els[0].get("href"):
+                    nxt = urllib.parse.urljoin(p.url, els[0].get("href"))
+                    via = "selector"
+            if not nxt and p.dom:
+                nxt = find_numbered_next(p.dom, p.url, p.url)
+                if nxt:
+                    via = "numbered"
+            if not nxt:
+                nxt = next_page_by_template(p.url if hasattr(p, "url") else url)
+                if nxt:
+                    via = "template"
+            url = nxt
         if url and delay:
             time.sleep(delay)
 
     return {"pages_crawled": pages_crawled, "items": len(data),
             "duplicates": duplicates, "failed_pages": failed,
             "stopped_reason": stopped, "data": data}
+
+
+# ---------------- structured data extraction ----------------
+# JSON-LD blocks + OpenGraph/Twitter meta tags: the machine-readable data
+# sites publish for crawlers. Often cleaner than scraping visible text.
+
+
+def extract_structured(dom, raw_html=None):
+    """Extract JSON-LD, OpenGraph, Twitter Card and basic meta tags.
+
+    JSON-LD comes from raw HTML (the DOM parser skips <script> content);
+    meta tags come from the DOM. Pure patterns, no per-site rules.
+
+    Returns {"json_ld": [...], "opengraph": {...}, "twitter": {...},
+             "meta": {...}}.
+    """
+    out = {"json_ld": [], "opengraph": {}, "twitter": {}, "meta": {}}
+    if raw_html:
+        for b in extract_embedded_json(raw_html):
+            if b.get("source") != "ld+json":
+                continue
+            data = b.get("data")
+            if isinstance(data, dict) and isinstance(data.get("@graph"), list):
+                out["json_ld"].extend(data["@graph"])
+            elif isinstance(data, list):
+                out["json_ld"].extend(data)
+            elif data is not None:
+                out["json_ld"].append(data)
+    if dom is None:
+        return out
+    for el in select(dom, "meta"):
+        content = el.get("content")
+        if content is None:
+            continue
+        prop = el.get("property") or ""
+        name = el.get("name") or ""
+        if prop.startswith("og:"):
+            out["opengraph"][prop[3:]] = content
+        elif name.startswith("twitter:"):
+            out["twitter"][name[8:]] = content
+        elif name in ("description", "keywords", "author"):
+            out["meta"][name] = content
+    return out
+
+
+def scrape_url_list(urls, engine_factory, selector=None, fields=None, auto=False,
+                    max_items=1000, workers=4, delay=0.0, timeout=180,
+                    respect_robots=True):
+    """Scrape a known URL list concurrently.
+
+    Each worker gets its own engine from engine_factory() (thread-safety by
+    isolation; each has its own cookie jar/pool). Shared dedup via lock.
+    delay is applied per-worker between requests (politeness). workers is
+    capped at 8 to avoid hammering small sites.
+
+    Returns like paginate_scrape: {"pages_crawled", "items", "duplicates",
+    "failed_pages", "stopped_reason", "data"}.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    deadline = time.time() + timeout
+    workers = max(1, min(int(workers), 8))
+    seen_items, data = set(), []
+    duplicates, failed, pages = 0, 0, 0
+    lock = threading.Lock()
+
+    def page_items(p):
+        if not p.dom:
+            return []
+        if auto:
+            d = scrape_auto(p.dom, p.url)
+            items = []
+            for cat, rows in d.items():
+                if isinstance(rows, list):
+                    for r in rows:
+                        items.append({"_category": cat, **r}
+                                     if isinstance(r, dict)
+                                     else {"_category": cat, "value": r})
+            return items
+        if selector and fields:
+            return scrape_items(p.dom, p.url, selector, fields)
+        return []
+
+    def one(url):
+        nonlocal duplicates, failed, pages
+        if time.time() > deadline:
+            return
+        with lock:
+            if len(data) >= max_items:
+                return
+        if respect_robots and not robots_allowed(url):
+            return
+        if delay:
+            time.sleep(delay)
+        eng = None
+        try:
+            eng = engine_factory()
+            r = eng.open(url)
+            if not r.get("success"):
+                with lock:
+                    failed += 1
+                return
+            items = page_items(eng.page)
+            with lock:
+                pages += 1
+                for item in items:
+                    key = _item_key(item)
+                    if key in seen_items:
+                        duplicates += 1
+                        continue
+                    seen_items.add(key)
+                    if len(data) >= max_items:
+                        break
+                    data.append(item)
+        except Exception:
+            with lock:
+                failed += 1
+        finally:
+            try:
+                if eng is not None:
+                    eng.close()
+            except Exception:
+                pass
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        list(ex.map(one, list(urls)))
+    stopped = "done"
+    if time.time() > deadline:
+        stopped = "timeout"
+    elif len(data) >= max_items:
+        stopped = "max-items"
+    return {"pages_crawled": pages, "items": len(data), "duplicates": duplicates,
+            "failed_pages": failed, "stopped_reason": stopped, "data": data}
 
 
 # ---------------- embedded JSON extraction ----------------

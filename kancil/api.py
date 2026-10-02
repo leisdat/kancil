@@ -427,12 +427,18 @@ class Kancil:
     def scrape(self, url=None, selector=None, fields=None, auto=False,
                fmt="json", pages=1, next_selector=None, delay=1.0,
                max_items=1000, timeout=180, same_content_limit=3,
-               scroll_pages=0, respect_robots=True):
+               scroll_pages=0, respect_robots=True, sitemap=False,
+               workers=1):
         """fields: {name: 'css' | 'css@attr'}.
 
         pages>1: paginated crawl (next_selector, numbered ?page=N, or
         template increment) with duplicate detection, robots.txt, and
         hard limits. scroll_pages>0: infinite scroll (playwright only).
+
+        sitemap=True: discover page URLs from sitemap.xml instead of
+        following next-page links (full coverage, no guessing).
+        workers=N: fetch a sitemap URL list with N concurrent workers
+        (static engine only, capped at 8).
         """
         from .devtools import paginate_scrape
         eng = self.engine
@@ -449,12 +455,43 @@ class Kancil:
         if scroll_pages and not eng.capabilities.get("javascript"):
             return fail("infinite scroll needs the playwright engine",
                         supported=False)
-        res = paginate_scrape(
-            eng, start, selector=selector, fields=fields, auto=auto,
-            max_pages=max(1, pages), max_items=max_items,
-            next_selector=next_selector, delay=delay, timeout=timeout,
-            same_content_limit=same_content_limit, scroll_pages=scroll_pages,
-            respect_robots=respect_robots)
+        res = None
+        url_list = None
+        if sitemap:
+            from .devtools import fetch_sitemap_urls
+            sm = fetch_sitemap_urls(start, max_urls=max(100, max_items * 2),
+                                    respect_robots=respect_robots)
+            url_list = sm["urls"][:max(1, pages)]
+            if not url_list:
+                return fail("no URLs found in sitemap (checked: %s)" %
+                            ", ".join(sm["sitemaps"][:3]) or "none")
+        if workers and int(workers) > 1 and not url_list:
+            return fail("workers=N needs sitemap=True (a known URL list); "
+                        "plain pagination is sequential by nature")
+        if url_list and workers and int(workers) > 1:
+            from .devtools import scrape_url_list
+            from .engines import StaticEngine
+            base = eng
+            if getattr(base, "capabilities", {}).get("javascript"):
+                return fail("workers need the static engine "
+                            "(playwright can't fan out browsers)",
+                            supported=False)
+
+            def factory(base=base):
+                return StaticEngine(user_agent=base.ua, timeout=base.timeout,
+                                    retries=0, proxy=base.proxy)
+            res = scrape_url_list(
+                url_list, factory, selector=selector, fields=fields,
+                auto=auto, max_items=max_items, workers=workers,
+                delay=delay, timeout=timeout, respect_robots=respect_robots)
+        else:
+            res = paginate_scrape(
+                eng, start, selector=selector, fields=fields, auto=auto,
+                max_pages=max(1, pages), max_items=max_items,
+                next_selector=next_selector, delay=delay, timeout=timeout,
+                same_content_limit=same_content_limit,
+                scroll_pages=scroll_pages, respect_robots=respect_robots,
+                url_list=url_list)
         data = res["data"]
         if fmt == "csv":
             import csv, io
@@ -590,6 +627,40 @@ class Kancil:
                             "keys": list(b["data"].keys())[:20]
                             if isinstance(b["data"], dict) else "list"}
                            for b in blobs])
+
+    def structured(self):
+        """Extract machine-readable structured data from the current page:
+        JSON-LD blocks, OpenGraph tags, Twitter Card tags, basic meta.
+        Often cleaner than scraping visible text (no selector guessing)."""
+        from .devtools import extract_structured
+        p, err = self._page_or_fail()
+        if err:
+            return err
+        if not getattr(p, "dom", None):
+            return fail("page has no DOM (content-type: %s)" %
+                        getattr(p, "ctype", "?"))
+        data = extract_structured(p.dom, getattr(p, "raw", None))
+        return ok(url=getattr(p, "url", ""), json_ld=data["json_ld"],
+                  opengraph=data["opengraph"], twitter=data["twitter"],
+                  meta=data["meta"],
+                  json_ld_blocks=len(data["json_ld"]))
+
+    def sitemap(self, url=None, max_urls=5000):
+        """Discover page URLs from the site's sitemap.xml (via robots.txt
+        Sitemap: lines, then /sitemap.xml fallback). Handles sitemapindex
+        recursion and .xml.gz."""
+        from .devtools import fetch_sitemap_urls
+        start = url
+        if not start:
+            p, err = self._page_or_fail()
+            if err:
+                return err
+            start = p.url if hasattr(p, "url") else None
+            if not start:
+                return fail("no url")
+        res = fetch_sitemap_urls(start, max_urls=max_urls)
+        return ok(url=start, count=len(res["urls"]), urls=res["urls"],
+                  sitemaps=res["sitemaps"], truncated=res["truncated"])
 
     def yt_search(self, query, max_results=20):
         """YouTube search via ytInitialData (no JS needed).
@@ -1317,6 +1388,8 @@ Kancil._TOOL_ACTIONS = {
         next_selector=p.get("next_selector"),
         max_items=int(p.get("max_items", 1000)),
         timeout=int(p.get("timeout", 180)),
+        sitemap=bool(p.get("sitemap")),
+        workers=int(p.get("workers", 1)),
         scroll_pages=int(p.get("scroll_pages", 0))),
     "extract": lambda s, p: s.extract(mode=p.get("mode", "auto")),
     "download": lambda s, p: s.download(p.get("url", ""), p.get("path")),
@@ -1344,6 +1417,9 @@ Kancil._TOOL_ACTIONS = {
     "bookmark_add": lambda s, p: s.bookmark_add(url=p.get("url"), title=p.get("title")),
     "bookmark_list": lambda s, p: s.bookmark_list(),
     "page_json": lambda s, p: s.page_json(),
+    "structured": lambda s, p: s.structured(),
+    "sitemap": lambda s, p: s.sitemap(url=p.get("url"),
+                                     max_urls=int(p.get("max_urls", 5000))),
     "yt_search": lambda s, p: s.yt_search(p.get("query", ""),
                                           int(p.get("max_results", 20))),
     "yt_video": lambda s, p: s.yt_video(p.get("url", "")),

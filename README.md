@@ -57,7 +57,7 @@ redaction on by default, header inspection.
 **Scraper** — pagination (numbered/next/infinite-scroll), dedup, robots.txt,
 `extract` (article/links/images/tables).
 
-**Agent Tool Interface** — 70 actions, JSON-in/JSON-out, structured error
+**Agent Tool Interface** — 73 actions, JSON-in/JSON-out, structured error
 codes (`ELEMENT_NOT_FOUND`, `TIMEOUT`, …). Built for LLM agents.
 `batch` runs many actions in one call; `network_curl` replays any logged
 request as a copy-pasteable curl command.
@@ -65,6 +65,10 @@ request as a copy-pasteable curl command.
 **YouTube kit** — `yt-search` (via `ytInitialData`, no JS needed), `yt-video`
 metadata, `yt-play` mini player, `page-json` embedded-JSON extraction
 (`__NEXT_DATA__`, `ld+json`, …).
+
+**Scraper power-ups** — `structured` (JSON-LD + OpenGraph/Twitter meta),
+`sitemap` (page discovery from sitemap.xml), `scrape --sitemap --workers N`
+(concurrent multi-page fetch).
 
 **Real-browser mode** — two levels, Kancil stays tiny, your phone's Chrome
 does the rendering:
@@ -112,7 +116,7 @@ kancil serve-proxy --mitm             # set WiFi proxy -> 127.0.0.1:8080
 ## Tests
 
 ```
-102 unit tests (stdlib unittest) + 5 live tests (public URLs, real Chromium)
+132 unit tests (stdlib unittest) + 5 live tests (public URLs, real Chromium)
 $ python3 -m unittest tests.test_browser
 $ python3 -m unittest tests.test_live      # needs network + chromium
 ```

@@ -79,6 +79,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(body)
         elif self.path == "/robots.txt":
             self._send(b"User-agent: *\nDisallow: /private\n", "text/plain")
+        elif self.path == "/sitemap.xml":
+            host = self.headers.get("Host", "127.0.0.1")
+            body = ('<sitemapindex xmlns="http://www.sitemaps.org/schemas/'
+                    'sitemap/0.9"><sitemap><loc>http://%s/sm1.xml</loc>'
+                    '</sitemap></sitemapindex>' % host).encode()
+            self._send(body, "application/xml")
+        elif self.path == "/sm1.xml":
+            host = self.headers.get("Host", "127.0.0.1")
+            urls = ["p1", "p2", "p3", "missing"]
+            body = ('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/'
+                    '0.9">' + "".join(
+                        '<url><loc>http://%s/%s</loc></url>' % (host, u)
+                        for u in urls) + "</urlset>").encode()
+            self._send(body, "application/xml")
+        elif self.path in ("/p1", "/p2", "/p3"):
+            name = self.path[1:].upper()
+            self._send(("<html><head><title>T-%s</title>"
+                        '<meta property="og:title" content="OG-%s">'
+                        '<meta name="twitter:card" content="summary">'
+                        '<meta name="description" content="Desc-%s">'
+                        '<script type="application/ld+json">'
+                        '{"@context":"https://schema.org","@graph":['
+                        '{"@type":"Article","headline":"H-%s"},'
+                        '{"@type":"WebPage","name":"W-%s"}]}'
+                        '</script></head>'
+                        "<body><h1>Page %s</h1></body></html>"
+                        % (name, name, name, name, name, name)).encode())
         elif self.path == "/private":
             self._send(b"<html><body><div class='card'>"
                        b"<h3 class='title'>Secret</h3></div></body></html>")
@@ -1719,6 +1746,111 @@ class SessionPersistTest(unittest.TestCase):
         finally:
             pass
         self.assertFalse(os.path.exists(session_mod.pw_state_path("staticsess")))
+
+
+class ScrapePowerTest(unittest.TestCase):
+    """v3.9.0: structured data, sitemap crawl, concurrent workers."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.port = free_port()
+        cls.srv = http.server.HTTPServer(("127.0.0.1", cls.port), Handler)
+        cls.th = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.th.start()
+        cls.base = "http://127.0.0.1:%d" % cls.port
+        cls.tmp = tempfile.mkdtemp()
+        os.environ["HOME"] = cls.tmp
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
+    def setUp(self):
+        self.b = Kancil(engine="static", timeout=10, retries=0)
+
+    def tearDown(self):
+        self.b.close()
+
+    def test_structured_live(self):
+        self.b.open(self.base + "/p1")
+        r = self.b.structured()
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["opengraph"].get("title"), "OG-P1")
+        self.assertEqual(r["twitter"].get("card"), "summary")
+        self.assertEqual(r["meta"].get("description"), "Desc-P1")
+        types = [x.get("@type") for x in r["json_ld"]]
+        self.assertIn("Article", types)
+        self.assertIn("WebPage", types)
+
+    def test_structured_tool_action(self):
+        self.b.open(self.base + "/p2")
+        r = self.b.tool({"action": "structured"})
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["opengraph"].get("title"), "OG-P2")
+
+    def test_extract_structured_pure(self):
+        from kancil.dom import build_dom
+        from kancil.devtools import extract_structured
+        html = ('<html><head>'
+                '<meta property="og:title" content="T">'
+                '<meta name="twitter:card" content="summary_large_image">'
+                '<meta name="description" content="D">'
+                '<script type="application/ld+json">'
+                '{"@type":"Product","name":"W"}'
+                "</script></head><body></body></html>")
+        d = build_dom(html)
+        raw = html.encode()
+        out = extract_structured(d, raw)
+        self.assertEqual(out["opengraph"], {"title": "T"})
+        self.assertEqual(out["twitter"], {"card": "summary_large_image"})
+        self.assertEqual(out["meta"], {"description": "D"})
+        self.assertEqual(len(out["json_ld"]), 1)
+        self.assertEqual(out["json_ld"][0]["@type"], "Product")
+
+    def test_sitemap_index(self):
+        from kancil.devtools import fetch_sitemap_urls
+        res = fetch_sitemap_urls(self.base + "/")
+        self.assertEqual(len(res["sitemaps"]), 2)  # index + sm1.xml
+        self.assertEqual(len(res["urls"]), 4)
+        self.assertTrue(all(u.startswith(self.base) for u in res["urls"]))
+        self.assertFalse(res["truncated"])
+
+    def test_sitemap_max_urls(self):
+        from kancil.devtools import fetch_sitemap_urls
+        res = fetch_sitemap_urls(self.base + "/", max_urls=2)
+        self.assertEqual(len(res["urls"]), 2)
+        self.assertTrue(res["truncated"])
+
+    def test_sitemap_tool_action(self):
+        r = self.b.tool({"action": "sitemap", "url": self.base + "/",
+                         "max_urls": 10})
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["count"], 4)
+
+    def test_scrape_sitemap_sequential(self):
+        r = self.b.scrape(url=self.base + "/", sitemap=True, selector="h1",
+                          fields={"t": "h1"}, pages=10, max_items=10,
+                          delay=0)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["items"], 3)  # /missing 404 is skipped
+        self.assertEqual(r["failed_pages"], 1)
+        titles = sorted(x["t"] for x in r["data"])
+        self.assertEqual(titles, ["Page P1", "Page P2", "Page P3"])
+
+    def test_scrape_sitemap_workers(self):
+        r = self.b.scrape(url=self.base + "/", sitemap=True, selector="h1",
+                          fields={"t": "h1"}, pages=10, max_items=10,
+                          delay=0, workers=3)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["items"], 3)
+        titles = sorted(x["t"] for x in r["data"])
+        self.assertEqual(titles, ["Page P1", "Page P2", "Page P3"])
+
+    def test_workers_needs_sitemap(self):
+        r = self.b.scrape(url=self.base + "/shop", selector=".card",
+                          fields={"t": ".title"}, workers=3)
+        self.assertFalse(r["success"])
+        self.assertIn("sitemap", str(r))
 
 
 if __name__ == "__main__":
