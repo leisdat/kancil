@@ -1,5 +1,22 @@
 # Changelog — Kancil
 
+## 3.12.0 (2026-10-02)
+
+Network log setara DevTools: query params + cookies per request.
+
+### Added
+- Setiap entri netlog (static + playwright) sekarang bawa `query`
+  (dict hasil parse), `cookies_sent` (dari header Cookie yang dikirim),
+  dan `cookies_set` (parse `Set-Cookie`: name/value/domain/path/
+  expires/secure/httponly/samesite).
+- `har_export` ngisi `request.cookies` / `response.cookies` (nilai
+  tetap di-redact default).
+- `kancil cookies` tetap untuk isi jar; cookies_import tetap untuk
+  warisi sesi browser asli.
+
+### Notes
+- 146 unit tests hijau (3 baru).
+
 ## 3.11.0 (2026-10-02)
 
 Tiga optimasi sekaligus.

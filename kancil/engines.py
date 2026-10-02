@@ -24,6 +24,55 @@ from .dom import (build_dom, extract_title, render_text, select, select_one,
 from . import httpcache
 
 
+# ---------------- network helpers (shared by both engines) ----------------
+
+def parse_query_params(url):
+    """URL query string -> {name: value} (first value wins, like DevTools)."""
+    out = {}
+    try:
+        for k, v in urllib.parse.parse_qsl(
+                urllib.parse.urlparse(url).query, keep_blank_values=True):
+            out.setdefault(k, v)
+    except Exception:
+        pass
+    return out
+
+
+def parse_cookie_header(value):
+    """'a=1; b=2' -> {'a': '1', 'b': '2'}."""
+    out = {}
+    for part in (value or "").split(";"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            k = k.strip()
+            if k:
+                out.setdefault(k, v.strip().strip('"'))
+    return out
+
+
+def parse_set_cookie(values):
+    """Raw Set-Cookie header(s) -> [{name, value, domain, path, expires,
+    secure, httponly, samesite}]. Uses http.cookies (stdlib)."""
+    from http.cookies import SimpleCookie
+    if isinstance(values, str):
+        values = [values]
+    out = []
+    for v in values or []:
+        try:
+            c = SimpleCookie()
+            c.load(v)
+        except Exception:
+            continue
+        for name, m in c.items():
+            out.append({"name": name, "value": m.value,
+                        "domain": m["domain"] or "", "path": m["path"] or "",
+                        "expires": m["expires"] or "",
+                        "secure": bool(m["secure"]),
+                        "httponly": bool(m["httponly"]),
+                        "samesite": (m["samesite"] or "").strip()})
+    return out
+
+
 # ---------------- tiny DNS cache ----------------
 # urllib -> http.client -> socket.getaddrinfo on every new connection.
 # A 5-minute TTL cache here saves real lookups for workers crawling many
@@ -596,6 +645,8 @@ class StaticEngine:
                      "method": "POST" if data else "GET",
                      "url": url, "status": "ERR", "ctype": "-", "size": 0,
                      "ms": 0, "req_headers": dict(req.header_items()), "res_headers": {},
+                     "query": parse_query_params(url),
+                     "cookies_sent": {}, "cookies_set": [],
                      "resource_type": "document",
                      "request_size": len(data) if data else 0,
                      "response_size": 0,
@@ -614,11 +665,19 @@ class StaticEngine:
                     enc = r.headers.get("Content-Encoding", "")
                     raw = self._decode_body(raw, enc)
                     body, trunc = self._body_preview(raw)
+                    try:
+                        set_ck = r.headers.get_all("Set-Cookie") or []
+                    except Exception:
+                        set_ck = []
                     entry.update({"url": r.geturl(), "status": r.status,
                                   "ctype": r.headers.get_content_type(), "size": len(raw),
                                   "response_size": len(raw),
                                   "ms": int((time.time() - t0) * 1000),
                                   "res_headers": dict(r.headers.items()),
+                                  "query": parse_query_params(r.geturl()),
+                                  "cookies_sent": parse_cookie_header(
+                                      req.get_header("Cookie")),
+                                  "cookies_set": parse_set_cookie(set_ck),
                                   "res_body": body, "res_truncated": trunc})
                     entry["timing"]["duration"] = entry["ms"]
                     self._log(entry)

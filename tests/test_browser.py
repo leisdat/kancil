@@ -2053,5 +2053,67 @@ class OptimizeTest(unittest.TestCase):
         self.assertEqual(r1, r2)
 
 
+class NetCookiesTest(unittest.TestCase):
+    """v3.12.0: query params + cookies in network log, HAR cookies."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.port = free_port()
+        cls.srv = http.server.HTTPServer(("127.0.0.1", cls.port), Handler)
+        cls.th = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.th.start()
+        cls.base = "http://127.0.0.1:%d" % cls.port
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
+    def setUp(self):
+        self.b = Kancil(engine="static", timeout=10, retries=0)
+
+    def tearDown(self):
+        self.b.close()
+
+    def test_parse_helpers(self):
+        from kancil import engines
+        self.assertEqual(engines.parse_query_params(
+            "https://h.test/p?a=1&b=&a=2"), {"a": "1", "b": ""})
+        self.assertEqual(engines.parse_query_params("https://h.test/"), {})
+        self.assertEqual(engines.parse_cookie_header("a=1; b=2"),
+                         {"a": "1", "b": "2"})
+        sc = engines.parse_set_cookie(
+            ["sess=abc123; Path=/; HttpOnly; SameSite=Lax"])
+        self.assertEqual(len(sc), 1)
+        self.assertEqual(sc[0]["name"], "sess")
+        self.assertEqual(sc[0]["value"], "abc123")
+        self.assertTrue(sc[0]["httponly"])
+        self.assertEqual(sc[0]["samesite"], "Lax")
+
+    def test_netlog_query_and_cookies(self):
+        self.b.open(self.base + "/setcookie")
+        e1 = self.b.engine.netlog[-1]
+        self.assertEqual(e1["cookies_set"][0]["name"], "sess")
+        self.b.open(self.base + "/shop?page=2&x=1")
+        e2 = self.b.engine.netlog[-1]
+        self.assertEqual(e2["query"], {"page": "2", "x": "1"})
+        self.assertEqual(e2["cookies_sent"], {"sess": "abc123"})
+
+    def test_har_cookies(self):
+        import json as _json
+        self.b.open(self.base + "/setcookie")
+        p = os.path.join(tempfile.mkdtemp(), "t.har")
+        r = self.b.har_export(p)  # redaction ON by default
+        self.assertTrue(r["success"], r)
+        har = _json.load(open(p))
+        e = har["log"]["entries"][0]
+        self.assertEqual(e["response"]["cookies"][0]["name"], "sess")
+        self.assertEqual(e["response"]["cookies"][0]["value"], "***")
+        r2 = self.b.har_export(p, redact=False)
+        self.assertTrue(r2["success"], r2)
+        har2 = _json.load(open(p))
+        self.assertEqual(har2["log"]["entries"][0]
+                        ["response"]["cookies"][0]["value"], "abc123")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

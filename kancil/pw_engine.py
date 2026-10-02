@@ -237,11 +237,19 @@ class PlaywrightEngine(engines.StaticEngine):
             post = req.post_data
         except Exception:
             pass
+        try:
+            req_headers = dict(req.headers)
+        except Exception:
+            req_headers = {}
         self.netlog.append({"id": self._req_id, "t": time.strftime("%H:%M:%S"),
                             "started": datetime.datetime.now().isoformat(timespec="seconds"),
                             "method": req.method, "url": req.url, "status": None,
                             "ctype": "-", "size": 0, "ms": 0,
-                            "req_headers": dict(req.headers), "res_headers": {},
+                            "req_headers": req_headers, "res_headers": {},
+                            "query": engines.parse_query_params(req.url),
+                            "cookies_sent": engines.parse_cookie_header(
+                                req_headers.get("cookie", "")),
+                            "cookies_set": [],
                             "resource_type": req.resource_type,
                             "request_size": len(post) if post else 0,
                             "response_size": 0,
@@ -258,6 +266,11 @@ class PlaywrightEngine(engines.StaticEngine):
                 e["status"] = res.status
                 e["ctype"] = res.headers.get("content-type", "-").split(";")[0]
                 e["res_headers"] = dict(res.headers)
+                try:
+                    set_ck = res.headers.get("set-cookie", "")
+                except Exception:
+                    set_ck = ""
+                e["cookies_set"] = engines.parse_set_cookie(set_ck)
                 e["ms"] = int((time.time() - e.pop("_t0", time.time())) * 1000)
                 e["timing"]["duration"] = e["ms"]
                 # capped body for text-ish resources only (never unbounded)

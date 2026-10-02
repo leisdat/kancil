@@ -957,12 +957,23 @@ class Kancil:
             if e.get("post_data"):
                 post = {"mimeType": "application/x-www-form-urlencoded",
                         "text": e["post_data"][:8192]}
+            req_cookies = [{"name": k, "value": ("***" if redact_cookie else v)}
+                           for k, v in (e.get("cookies_sent") or {}).items()]
+            res_cookies = []
+            for c in e.get("cookies_set") or []:
+                res_cookies.append({
+                    "name": c.get("name", ""),
+                    "value": "***" if redact_cookie else c.get("value", ""),
+                    "path": c.get("path", ""), "domain": c.get("domain", ""),
+                    "expires": c.get("expires", ""),
+                    "httpOnly": bool(c.get("httponly")),
+                    "secure": bool(c.get("secure"))})
             entries.append({
                 "startedDateTime": started,
                 "time": e.get("ms", 0),
                 "request": {
                     "method": e.get("method"), "url": e.get("url"),
-                    "httpVersion": "HTTP/1.1", "cookies": [],
+                    "httpVersion": "HTTP/1.1", "cookies": req_cookies,
                     "headers": [{"name": k, "value": str(v)} for k, v in req_hdrs.items()],
                     "queryString": qs, "headersSize": -1,
                     "bodySize": e.get("request_size", 0),
@@ -970,7 +981,7 @@ class Kancil:
                 },
                 "response": {
                     "status": e.get("status") if isinstance(e.get("status"), int) else 0,
-                    "statusText": "", "httpVersion": "HTTP/1.1", "cookies": [],
+                    "statusText": "", "httpVersion": "HTTP/1.1", "cookies": res_cookies,
                     "headers": [{"name": k, "value": str(v)} for k, v in res_hdrs.items()],
                     "content": {"size": e.get("response_size", e.get("size", 0)),
                                 "mimeType": e.get("ctype", "")},
