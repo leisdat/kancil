@@ -14,6 +14,38 @@ from . import session as session_mod
 from .dom import inspect_element
 
 
+def _browser_env():
+    """Environment for the browser child process.
+
+    Termux exports LD_PRELOAD=libtermux-exec.so, which breaks Chromium/Firefox
+    child processes (CANNOT LINK EXECUTABLE). Strip it for the browser only.
+    Returns None when no fixup is needed (playwright then inherits os.environ).
+    """
+    if "LD_PRELOAD" not in os.environ:
+        return None
+    return {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
+
+
+def find_camoufox_binary():
+    """Find a cached Camoufox firefox binary (Termux + desktop Linux).
+
+    Camoufox downloads go to the app cache; playwright can drive the binary
+    directly via executable_path. Returns the path or None.
+    """
+    import glob
+    home = os.path.expanduser("~")
+    patterns = [
+        "/data/data/com.termux/cache/camoufox/browsers/*/firefox",
+        os.path.join(home, ".cache/camoufox/browsers/*/firefox"),
+        os.path.join(home, ".cache/camoufox/*/firefox"),
+    ]
+    for pat in patterns:
+        for p in sorted(glob.glob(pat)):
+            if os.path.isfile(p) and os.access(p, os.X_OK):
+                return p
+    return None
+
+
 class PlaywrightEngine(engines.StaticEngine):
     name = "playwright"
     capabilities = {
@@ -74,14 +106,13 @@ class PlaywrightEngine(engines.StaticEngine):
             launch_kw = {"headless": headless}
             if proxy:
                 launch_kw["proxy"] = {"server": proxy}
+            if browser == "firefox" and not executable_path:
+                executable_path = find_camoufox_binary()
             if executable_path:
                 launch_kw["executable_path"] = executable_path
-            # Termux exports LD_PRELOAD=libtermux-exec.so, which breaks
-            # Chromium/Firefox child processes (CANNOT LINK EXECUTABLE).
-            # Strip it from the browser's environment only.
-            if "LD_PRELOAD" in os.environ:
-                launch_kw["env"] = {k: v for k, v in os.environ.items()
-                                    if k != "LD_PRELOAD"}
+            env = _browser_env()
+            if env is not None:
+                launch_kw["env"] = env
             launcher = getattr(self._pw, browser, None)
             if launcher is None:
                 raise engines.EngineError(

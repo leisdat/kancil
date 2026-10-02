@@ -1362,5 +1362,141 @@ class BrowserTest(unittest.TestCase):
         self.assertIn('data-kancil-url="https://ex.com/"', out)
 
 
+class MoatTest(unittest.TestCase):
+    """v3.5.0 moat features: network_curl, batch, browser env, camoufox."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.port = free_port()
+        cls.srv = http.server.HTTPServer(("127.0.0.1", cls.port), Handler)
+        cls.th = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.th.start()
+        cls.base = "http://127.0.0.1:%d" % cls.port
+        cls.tmp = tempfile.mkdtemp()
+        os.environ["HOME"] = cls.tmp
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
+    def setUp(self):
+        self.b = Kancil(engine="static", timeout=10, retries=0)
+
+    def tearDown(self):
+        self.b.close()
+
+    def test_network_curl_get(self):
+        self.b.open(self.base + "/")
+        r = self.b.tool({"action": "network_curl", "id": 1})
+        self.assertTrue(r["success"], r)
+        c = r["curl"]
+        self.assertTrue(c.startswith("curl -X GET "))
+        self.assertIn(self.base + "/", c)
+        self.assertIn("-H", c)  # headers included
+
+    def test_network_curl_post(self):
+        self.b.engine._log({"t": "t", "method": "POST",
+                            "url": "https://ex.com/api?q=1",
+                            "status": 200, "ctype": "application/json",
+                            "size": 2, "ms": 1,
+                            "req_headers": {"Content-Type": "application/json"},
+                            "res_headers": {},
+                            "post_data": '{"a": 1}'})
+        rid = self.b.engine._req_id
+        r = self.b.tool({"action": "network_curl", "id": rid})
+        self.assertTrue(r["success"], r)
+        self.assertIn("--data-raw", r["curl"])
+        self.assertIn("ex.com/api", r["curl"])
+
+    def test_network_curl_bad_id(self):
+        r = self.b.tool({"action": "network_curl", "id": 99999})
+        self.assertFalse(r["success"])
+
+    def test_network_curl_shell_quoting(self):
+        self.b.engine._log({"t": "t", "method": "GET",
+                            "url": "https://ex.com/?q=a'b",
+                            "status": 200, "ctype": "-", "size": 0, "ms": 1,
+                            "req_headers": {}, "res_headers": {}})
+        r = self.b.tool({"action": "network_curl",
+                         "id": self.b.engine._req_id})
+        self.assertTrue(r["success"], r)
+        # shlex.quote escapes the single quote -> safe to paste into a shell
+        self.assertIn("'\"'\"'", r["curl"])
+
+    def test_batch_runs_all(self):
+        self.b.open(self.base + "/")
+        r = self.b.tool({"action": "batch", "actions": [
+            {"action": "network_curl", "id": 1},
+            {"action": "bogus_action"},
+            {"action": "capabilities"},
+        ]})
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["count"], 3)
+        got = [x["result"]["success"] for x in r["results"]]
+        self.assertEqual(got, [True, False, True])
+
+    def test_batch_stop_on_error(self):
+        r = self.b.tool({"action": "batch", "stop_on_error": True, "actions": [
+            {"action": "bogus_action"},
+            {"action": "capabilities"},
+        ]})
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["count"], 1)
+
+    def test_batch_validation(self):
+        r = self.b.tool({"action": "batch"})
+        self.assertFalse(r["success"])
+        r = self.b.tool({"action": "batch",
+                         "actions": [{"action": "capabilities"}] * 26})
+        self.assertFalse(r["success"])
+
+    def test_browser_env_strips_ld_preload(self):
+        from kancil.pw_engine import _browser_env
+        old = os.environ.get("LD_PRELOAD")
+        try:
+            os.environ["LD_PRELOAD"] = "libtermux-exec.so"
+            env = _browser_env()
+            self.assertIsNotNone(env)
+            self.assertNotIn("LD_PRELOAD", env)
+            self.assertIn("HOME", env)
+        finally:
+            if old is None:
+                os.environ.pop("LD_PRELOAD", None)
+            else:
+                os.environ["LD_PRELOAD"] = old
+        # no LD_PRELOAD -> None (playwright inherits os.environ)
+        os.environ.pop("LD_PRELOAD", None)
+        self.assertIsNone(_browser_env())
+
+    def test_find_camoufox_binary(self):
+        from kancil import pw_engine
+        d = os.path.join(self.tmp, ".cache", "camoufox", "browsers",
+                         "camoufox-152.0.4-beta")
+        os.makedirs(d)
+        fake = os.path.join(d, "firefox")
+        with open(fake, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(fake, 0o755)
+        old_home = os.environ.get("HOME")
+        os.environ["HOME"] = self.tmp
+        try:
+            found = pw_engine.find_camoufox_binary()
+        finally:
+            if old_home is not None:
+                os.environ["HOME"] = old_home
+        self.assertEqual(found, fake)
+
+    def test_find_camoufox_none(self):
+        from kancil import pw_engine
+        empty = tempfile.mkdtemp()
+        old_home = os.environ.get("HOME")
+        os.environ["HOME"] = empty
+        try:
+            self.assertIsNone(pw_engine.find_camoufox_binary())
+        finally:
+            if old_home is not None:
+                os.environ["HOME"] = old_home
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

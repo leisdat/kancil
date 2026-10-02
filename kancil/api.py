@@ -330,6 +330,48 @@ class Kancil:
             return self._wrap(fn(rid, max_bytes=max_bytes))
         return fail("response inspection not available on this engine")
 
+    def network_curl(self, rid):
+        """Replay a logged request as a copy-pasteable curl command."""
+        import shlex
+        e = self.engine.request(rid)
+        if not e:
+            return fail("no such request id %s" % rid)
+        parts = ["curl", "-X", e.get("method", "GET"),
+                 shlex.quote(e.get("url", ""))]
+        for k, v in (e.get("req_headers") or {}).items():
+            if k.lower() in ("content-length", "host"):
+                continue
+            parts += ["-H", shlex.quote("%s: %s" % (k, v))]
+        post = e.get("post_data")
+        if post:
+            if e.get("post_truncated"):
+                return fail("request body truncated in netlog",
+                            hint="curl would be incomplete; use har_export")
+            parts += ["--data-raw", shlex.quote(post)]
+        return ok(id=rid, curl=" ".join(parts))
+
+    def tool_batch(self, payload):
+        """Run several tool actions in one call. Saves LLM roundtrips."""
+        actions = payload.get("actions")
+        if not isinstance(actions, list):
+            return {"success": False, "error": {
+                "code": "INVALID_INPUT",
+                "message": "batch needs an 'actions' list of tool payloads"}}
+        if len(actions) > 25:
+            return {"success": False, "error": {
+                "code": "INVALID_INPUT",
+                "message": "batch capped at 25 actions per call"}}
+        stop = bool(payload.get("stop_on_error"))
+        out = []
+        for i, sub in enumerate(actions):
+            r = self.tool(sub)
+            out.append({"index": i,
+                        "action": sub.get("action") if isinstance(sub, dict) else None,
+                        "result": r})
+            if stop and not r.get("success"):
+                break
+        return {"success": True, "count": len(out), "results": out}
+
     # ---------- storage ----------
     def cookies(self):
         return ok(cookies=self.engine.cookies())
@@ -461,7 +503,7 @@ class Kancil:
         return ok(tabs=get_bridge().tabs())
 
     def agent_cmd(self, tab, action, args=None, timeout=30):
-        """Send a command to a live tab: click/type/scroll/eval/snapshot/text.
+        """Send a command to a live tab: click/type/scroll/eval/snapshot/text/console.
 
         Example: agent_cmd(tab="tab-abc", action="click",
                            args={"selector": "a[href='/login']"})
@@ -1221,6 +1263,8 @@ Kancil._TOOL_ACTIONS = {
         type_=p.get("type"), status=p.get("status"), method=p.get("method")),
     "network_request": lambda s, p: s.network_request(int(p.get("id", -1))),
     "network_response": lambda s, p: s.network_response(int(p.get("id", -1))),
+    "network_curl": lambda s, p: s.network_curl(int(p.get("id", -1))),
+    "batch": lambda s, p: s.tool_batch(p),
     "har_export": lambda s, p: s.har_export(p.get("path", "network.har")),
     # storage
     "cookies": lambda s, p: s.cookies(),

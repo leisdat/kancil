@@ -5,6 +5,27 @@
  */
 (function () {
   'use strict';
+  // ---- console capture: hook before the page logs anything ----
+  var conBuf = [];
+  (function hookConsole() {
+    ['log', 'warn', 'error', 'debug', 'info'].forEach(function (m) {
+      var orig = null;
+      try { orig = console[m] ? console[m].bind(console) : null; } catch (e) {}
+      console[m] = function () {
+        try {
+          var args = Array.prototype.map.call(arguments, function (a) {
+            var s;
+            try { s = (typeof a === 'string') ? a : JSON.stringify(a); }
+            catch (e) { s = String(a); }
+            return String(s).slice(0, 500);
+          });
+          conBuf.push({ t: Date.now(), level: m, args: args });
+          if (conBuf.length > 200) conBuf.splice(0, conBuf.length - 200);
+        } catch (e) {}
+        if (orig) orig.apply(null, arguments);
+      };
+    });
+  })();
   // absolute gateway base derived from our own <script src> — the page
   // carries <base href="origin"> so relative URLs would resolve wrongly.
   var _cs = document.currentScript;
@@ -16,6 +37,7 @@
             Date.now().toString(36);
   var seq = 0;
   var polling = false;
+  var fails = 0; // consecutive poll failures (auto-reconnect)
 
   function post(path, obj) {
     return fetch(BASE + path, {
@@ -91,6 +113,10 @@
       } else if (c.action === 'text') {
         out = { text: (document.body ? document.body.innerText : '')
                 .slice(0, 8000) };
+      } else if (c.action === 'console') {
+        var n = c.args.limit || 50;
+        out = { entries: conBuf.slice(-n), buffered: conBuf.length };
+        if (c.args.clear) conBuf.length = 0;
       } else {
         out = { error: 'unknown action: ' + c.action };
       }
@@ -109,13 +135,23 @@
       .then(function (r) { return r.json(); })
       .then(function (cmds) {
         polling = false;
+        fails = 0; // healthy again
         var p = Promise.resolve();
         (cmds || []).forEach(function (c) {
           p = p.then(function () { return execCmd(c); });
         });
         return p.then(function () { setTimeout(poll, 300); });
       })
-      .catch(function () { polling = false; setTimeout(poll, 2000); });
+      .catch(function () {
+        polling = false;
+        fails++;
+        if (fails >= 5) {
+          // bridge may have restarted and lost our tab — re-register
+          fails = 0;
+          register();
+        }
+        setTimeout(poll, Math.min(2000 * fails, 30000));
+      });
   }
 
   // register, then start polling (also re-register on visibility change)

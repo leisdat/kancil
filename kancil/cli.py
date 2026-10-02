@@ -700,12 +700,28 @@ def dispatch(b, args):
         print("`kancil serve-proxy --mitm`.")
         return {"success": True, "ca_crt": crt}
     if c == "serve-proxy":
-        from .proxy_server import ProxyServer
+        from .proxy_server import ProxyServer, ca_fingerprint, ca_paths
         srv = ProxyServer(b, host=args.host, port=args.port,
                           mitm=args.mitm)
         url = srv.start()
         print("kancil serve-proxy: %s  (mitm=%s)" % (url, srv.mitm))
-        print("Set phone WiFi proxy -> %s:%d" % (args.host, srv.port))
+        if args.mitm and not srv.mitm:
+            print()
+            print("MITM requested but NOT active. Fix:")
+            print("  1. Install openssl : pkg install openssl  (Termux)")
+            print("  2. Generate the CA : kancil proxy-ca")
+            print("  3. Install ca.crt on the phone: Settings > Security >")
+            print("     Encryption & credentials > Install a certificate > CA")
+            print("  4. Re-run          : kancil serve-proxy --mitm")
+        else:
+            print("Set phone WiFi proxy -> %s:%d" % (args.host, srv.port))
+            if srv.mitm:
+                try:
+                    crt, _k = ca_paths()
+                    print("MITM CA fingerprint: %s" % ca_fingerprint(crt))
+                    print("(it must match the CA certificate installed on the phone)")
+                except Exception:
+                    pass
         print("Ctrl+C to stop.")
         try:
             import time as _t

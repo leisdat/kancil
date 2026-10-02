@@ -1,5 +1,27 @@
 # Changelog — Kancil
 
+## 3.5.0 (2026-10-02)
+
+Moat update: memperkuat yang Hermes tidak punya, menetralkan keunggulan
+render tanpa bundel browser.
+
+### Added
+- `network_curl` tool action: replay request dari netlog jadi perintah curl
+  siap paste (`kancil tool '{"action":"network_curl","id":3}'`). Aman
+  shell-quoting, termasuk POST body.
+- `batch` tool action: banyak aksi dalam 1 call (`actions` + opsional
+  `stop_on_error`), hemat roundtrip LLM. Maks 25 aksi.
+- `serve-proxy --mitm`: kalau MITM gagal aktif, tampilkan langkah perbaikan
+  (install openssl → proxy-ca → install cert → re-run); kalau aktif,
+  tampilkan fingerprint CA untuk verifikasi.
+- `agent.js`: console capture (hook console.log/warn/error, buffer 200,
+  diambil via `kancil agent cmd <tab> console`) + auto-reconnect
+  (backoff eksponensial, re-register setelah 5 gagal — tahan kalau
+  bridge restart).
+- Playwright engine: auto-detect binary Camoufox di cache Termux
+  (`/data/data/com.termux/cache/camoufox/...`) dan `~/.cache/camoufox`
+  saat `--pw-browser firefox` tanpa `--executable-path`.
+
 ## 3.4.1 (2026-10-02)
 
 Termux-friendly: playwright engine sekarang dukung browser custom & aman

@@ -269,14 +269,16 @@ Error codes: `INVALID_URL TAB_NOT_FOUND ELEMENT_NOT_FOUND TIMEOUT
 NAVIGATION_FAILED JS_ERROR NETWORK_ERROR SESSION_NOT_FOUND SCRAPE_FAILED
 DOWNLOAD_FAILED ENGINE_UNAVAILABLE INVALID_INPUT UNKNOWN_ACTION`.
 
-59 actions: open/back/forward/reload/history, tabs/new_tab/switch_tab/close_tab,
+70 actions: open/back/forward/reload/history, tabs/new_tab/switch_tab/close_tab,
 inspect/elements/a11y/a11y_find/dom_tree/dom_find/dom_xpath,
 click/type/clear/select/check/uncheck/hover/focus/scroll, evaluate/wait,
-network/network_request/network_response/har_export, cookies/storage(+get/set/delete),
+network/network_request/network_response/network_curl/har_export, batch,
+cookies/storage(+get/set/delete),
 screenshot/pdf, scrape/extract/download/downloads,
 session_save/session_load/session_delete/session_info/session_list,
 snapshot/observe/console/warnings/errors/perf/forms/form_fill/form_submit,
-bookmark_add/bookmark_list, capabilities.
+bookmark_add/bookmark_list, page_json/yt_search/yt_video/yt_play,
+view/view_stop/agent_tabs/agent_cmd/agent_snapshot, capabilities.
 
 Dari Python: `Kancil().tool({"action": "click", "selector": "#login"})`.
 

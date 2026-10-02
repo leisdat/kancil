@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.4.0-brightgreen" alt="version">
-  <img src="https://img.shields.io/badge/tests-102%20unit%20%2B%205%20live-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/version-3.5.0-brightgreen" alt="version">
+  <img src="https://img.shields.io/badge/tests-112%20unit%20%2B%205%20live-brightgreen" alt="tests">
   <img src="https://img.shields.io/badge/size-106%20KB-blue" alt="size">
   <img src="https://img.shields.io/badge/dependencies-0-blue" alt="zero deps">
   <img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="python">
@@ -57,8 +57,10 @@ redaction on by default, header inspection.
 **Scraper** — pagination (numbered/next/infinite-scroll), dedup, robots.txt,
 `extract` (article/links/images/tables).
 
-**Agent Tool Interface** — 68 actions, JSON-in/JSON-out, structured error
+**Agent Tool Interface** — 70 actions, JSON-in/JSON-out, structured error
 codes (`ELEMENT_NOT_FOUND`, `TIMEOUT`, …). Built for LLM agents.
+`batch` runs many actions in one call; `network_curl` replays any logged
+request as a copy-pasteable curl command.
 
 **YouTube kit** — `yt-search` (via `ytInitialData`, no JS needed), `yt-video`
 metadata, `yt-play` mini player, `page-json` embedded-JSON extraction
@@ -67,13 +69,17 @@ metadata, `yt-play` mini player, `page-json` embedded-JSON extraction
 **Real-browser mode** — two levels, Kancil stays tiny, your phone's Chrome
 does the rendering:
 - **Level 1**: `kancil view` injects `agent.js` — snapshot the real DOM,
-  click, type, eval JS. `kancil agent tabs|cmd|snap`.
+  click, type, eval JS, capture console logs. Auto-reconnects with
+  exponential backoff. `kancil agent tabs|cmd|snap`.
 - **Level 2**: `kancil serve-proxy [--mitm]` — route your phone browser's
   traffic through Kancil. Works on login-walled sites because the requests
-  come from your real browser.
+  come from your real browser. `--mitm` prints fix steps when the CA isn't
+  ready, and the CA fingerprint when it is.
 
 **Playwright engine** (optional) — real Chromium when you need full JS,
-screenshots, PDF, request blocking. Same API.
+screenshots, PDF, request blocking. Same API. `--pw-browser firefox`
+auto-detects a cached Camoufox binary on Termux; `LD_PRELOAD` is stripped
+automatically so Termux's libtermux-exec doesn't crash the browser.
 
 ## Quickstart
 
