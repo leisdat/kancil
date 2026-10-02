@@ -1,5 +1,24 @@
 # Changelog — Kancil
 
+## 3.10.0 (2026-10-02)
+
+Level 2 tanpa openssl, Level 1 dirampingkan.
+
+### Added
+- `kancil/x509.py`: RSA-2048 + X.509 murni stdlib (Miller-Rabin,
+  PKCS#1 v1.5, DER). `proxy-ca` dan `serve-proxy --mitm` tidak butuh
+  binary openssl lagi — `pkg install openssl` hilang dari syarat.
+  openssl CLI tetap jadi fallback kalau tersedia.
+- Fingerprint CA dihitung murni Python (format `SHA256 Fingerprint=..`).
+
+### Changed
+- Level 1 (viewer/agent_bridge): hapus docstring ganda, hoist import ke
+  modul, hilangkan double-parse URL di routing agent. Tetap 0 dependency.
+
+### Notes
+- 136 unit tests hijau (4 baru: x509 roundtrip, verifikasi signature,
+  ensure_ca, host_cert + `openssl verify` silang kalau tersedia).
+
 ## 3.9.0 (2026-10-02)
 
 Scraper naik kelas: structured data, sitemap crawl, concurrent fetch.

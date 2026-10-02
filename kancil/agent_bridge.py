@@ -11,6 +11,7 @@ Hermes (or any agent) drives it via: agent_tabs / agent_cmd / agent_snapshot
 """
 
 import itertools
+import json
 import threading
 import time
 
@@ -152,8 +153,6 @@ def route_agent(path, query, body):
     path: e.g. "/__kancil__/agent/poll"; query: dict; body: parsed JSON (or {}).
     Returns (status_code, content_type, body_bytes) or None if not an agent path.
     """
-    import json
-    import urllib.parse as up
     GW = "/__kancil__"
     if not path.startswith(GW + "/"):
         return None

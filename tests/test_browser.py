@@ -1,9 +1,11 @@
 """Kancil test suite — stdlib unittest, local test server only."""
 import http.server
+import hashlib
 import json
 import os
 import shutil
 import socket
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -1851,6 +1853,95 @@ class ScrapePowerTest(unittest.TestCase):
                           fields={"t": ".title"}, workers=3)
         self.assertFalse(r["success"])
         self.assertIn("sitemap", str(r))
+
+
+class SlimLevel2Test(unittest.TestCase):
+    """v3.10.0: pure-Python X.509 (no openssl CLI needed)."""
+
+    @classmethod
+    def setUpClass(cls):
+        from kancil import session as session_mod
+        cls._old_base = session_mod.BASE
+        cls.tmp = tempfile.mkdtemp()
+        session_mod.BASE = os.path.join(cls.tmp, ".kancil")
+
+    @classmethod
+    def tearDownClass(cls):
+        from kancil import session as session_mod
+        session_mod.BASE = cls._old_base
+
+    def test_x509_key_pem_roundtrip(self):
+        from kancil import x509
+        k = x509.gen_rsa(1024)
+        k2 = x509.parse_rsa_private_pem(x509.rsa_private_pem(k))
+        self.assertEqual(k2["n"], k["n"])
+        self.assertEqual(k2["d"], k["d"])
+        self.assertEqual(k2["e"], 65537)
+
+    def test_x509_ca_and_host_cert(self):
+        from kancil import x509
+        ca_key = x509.gen_rsa(1024)
+        host_key = x509.gen_rsa(1024)
+        ca_der = x509.make_ca("Test CA", ca_key)
+        h_der = x509.make_host_cert("example.com", host_key,
+                                    "Test CA", ca_key)
+        # signature self-verifies: decrypt sig with CA pubkey == DigestInfo
+        seq = x509._Reader(ca_der).seq()
+        tag, tbs_content = seq.tlv()
+        tbs = x509._tlv(tag, tbs_content)  # signature covers full TLV
+        seq.tlv()
+        sig = seq.tlv()[1][1:]  # BIT STRING -> skip unused-bits byte
+        k = (ca_key["n"].bit_length() + 7) // 8
+        em = pow(int.from_bytes(sig, "big"), ca_key["e"],
+                 ca_key["n"]).to_bytes(k, "big")
+        expect = (b"\x00\x01" + b"\xff" * (k - 51 - 3) + b"\x00"
+                  + x509._SHA256_DIGESTINFO_PREFIX
+                  + hashlib.sha256(tbs).digest())
+        self.assertEqual(em, expect)
+        if shutil.which("openssl"):
+            with open(os.path.join(self.tmp, "t.crt"), "w") as f:
+                f.write(x509.pem_encode("CERTIFICATE", ca_der))
+            with open(os.path.join(self.tmp, "h.crt"), "w") as f:
+                f.write(x509.pem_encode("CERTIFICATE", h_der))
+            out = subprocess.run(
+                ["openssl", "verify", "-CAfile",
+                 os.path.join(self.tmp, "t.crt"),
+                 os.path.join(self.tmp, "h.crt")],
+                capture_output=True, text=True, timeout=30)
+            self.assertIn("OK", out.stdout)
+
+    def test_ensure_ca_pure_python(self):
+        from kancil import proxy_server as ps
+        from kancil import session as session_mod
+        crt, key = ps.ensure_ca()
+        self.assertTrue(os.path.exists(crt))
+        self.assertTrue(os.path.exists(key))
+        self.assertTrue(os.path.exists(ps._host_key_path()))
+        fp = ps.ca_fingerprint(crt)
+        self.assertTrue(fp.startswith("SHA256 Fingerprint="))
+        self.assertEqual(len(fp.split("=")[1].split(":")), 32)
+        # idempotent
+        crt2, _ = ps.ensure_ca()
+        self.assertEqual(crt, crt2)
+
+    def test_host_cert_cached_and_valid(self):
+        from kancil import proxy_server as ps
+        h_crt, h_key = ps.host_cert("example.com")
+        self.assertTrue(os.path.exists(h_crt))
+        h_crt2, h_key2 = ps.host_cert("example.com")
+        self.assertEqual(h_crt, h_crt2)  # cached, not regenerated
+        self.assertEqual(h_key, h_key2)
+        if shutil.which("openssl"):
+            crt, _ = ps.ensure_ca()
+            out = subprocess.run(
+                ["openssl", "verify", "-CAfile", crt, h_crt],
+                capture_output=True, text=True, timeout=30)
+            self.assertIn("OK", out.stdout)
+            out = subprocess.run(
+                ["openssl", "x509", "-in", h_crt, "-noout",
+                 "-ext", "subjectAltName"],
+                capture_output=True, text=True, timeout=30)
+            self.assertIn("DNS:example.com", out.stdout)
 
 
 if __name__ == "__main__":

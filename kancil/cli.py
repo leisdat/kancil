@@ -745,11 +745,11 @@ def dispatch(b, args):
         if args.mitm and not srv.mitm:
             print()
             print("MITM requested but NOT active. Fix:")
-            print("  1. Install openssl : pkg install openssl  (Termux)")
-            print("  2. Generate the CA : kancil proxy-ca")
-            print("  3. Install ca.crt on the phone: Settings > Security >")
+            print("  1. Generate the CA : kancil proxy-ca  (pure Python, no")
+            print("     openssl needed; openssl CLI is only a fallback)")
+            print("  2. Install ca.crt on the phone: Settings > Security >")
             print("     Encryption & credentials > Install a certificate > CA")
-            print("  4. Re-run          : kancil serve-proxy --mitm")
+            print("  3. Re-run          : kancil serve-proxy --mitm")
         else:
             print("Set phone WiFi proxy -> %s:%d" % (args.host, srv.port))
             if srv.mitm:

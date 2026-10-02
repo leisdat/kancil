@@ -116,7 +116,7 @@ kancil serve-proxy --mitm             # set WiFi proxy -> 127.0.0.1:8080
 ## Tests
 
 ```
-132 unit tests (stdlib unittest) + 5 live tests (public URLs, real Chromium)
+136 unit tests (stdlib unittest) + 5 live tests (public URLs, real Chromium)
 $ python3 -m unittest tests.test_browser
 $ python3 -m unittest tests.test_live      # needs network + chromium
 ```

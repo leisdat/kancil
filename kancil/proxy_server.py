@@ -45,6 +45,13 @@ def ca_paths():
     return os.path.join(d, "ca.crt"), os.path.join(d, "ca.key")
 
 
+CA_CN = "Kancil Proxy CA"
+
+
+def _host_key_path():
+    return os.path.join(ca_dir(), "host.key")
+
+
 def openssl_ok():
     try:
         subprocess.run(["openssl", "version"], capture_output=True,
@@ -55,24 +62,60 @@ def openssl_ok():
 
 
 def ensure_ca():
-    """Generate the MITM CA (needs openssl CLI). Returns (crt, key)."""
-    if not openssl_ok():
-        raise RuntimeError("openssl CLI not found — install it first "
-                           "(Termux: pkg install openssl; "
-                           "Debian/Ubuntu: sudo apt install openssl)")
+    """Generate the MITM CA. Pure Python (kancil.x509) by default;
+    openssl CLI only as a fallback. Returns (crt, key)."""
     crt, key = ca_paths()
-    if os.path.exists(crt) and os.path.exists(key):
+    hkey = _host_key_path()
+    if all(os.path.exists(p) for p in (crt, key, hkey)):
         return crt, key
+    try:
+        from . import x509
+        ca_key = x509.gen_rsa(2048)
+        host_key = x509.gen_rsa(2048)  # one shared key for all host certs
+        ca_der = x509.make_ca(CA_CN, ca_key)
+        with open(crt, "w") as f:
+            f.write(x509.pem_encode("CERTIFICATE", ca_der))
+        with open(key, "w") as f:
+            f.write(x509.rsa_private_pem(ca_key))
+        with open(hkey, "w") as f:
+            f.write(x509.rsa_private_pem(host_key))
+        os.chmod(key, 0o600)
+        os.chmod(hkey, 0o600)
+        return crt, key
+    except Exception as e:
+        if not openssl_ok():
+            raise RuntimeError(
+                "CA generation failed (%s) and openssl CLI is not "
+                "installed (Termux: pkg install openssl)" % str(e)[:100])
+        return _ensure_ca_openssl()
+
+
+def _ensure_ca_openssl():
+    """Fallback: original openssl-based CA generation."""
+    crt, key = ca_paths()
     subprocess.run(
         ["openssl", "req", "-x509", "-newkey", "rsa:2048",
          "-keyout", key, "-out", crt, "-days", "825", "-nodes",
-         "-subj", "/CN=Kancil Proxy CA"], check=True, timeout=60,
+         "-subj", "/CN=" + CA_CN], check=True, timeout=60,
         capture_output=True)
     os.chmod(key, 0o600)
+    # openssl path uses per-host keys; create a shared host key for uniformity
+    subprocess.run(
+        ["openssl", "genrsa", "-out", _host_key_path(), "2048"],
+        check=True, timeout=60, capture_output=True)
+    os.chmod(_host_key_path(), 0o600)
     return crt, key
 
 
 def ca_fingerprint(crt):
+    """SHA256 fingerprint, openssl-style. Pure Python."""
+    try:
+        from . import x509
+        with open(crt) as f:
+            der = x509.pem_decode(f.read())
+        return "SHA256 Fingerprint=" + x509.cert_fingerprint_sha256(der)
+    except Exception:
+        pass
     try:
         out = subprocess.run(
             ["openssl", "x509", "-in", crt, "-noout",
@@ -92,7 +135,25 @@ def host_cert(host):
     h_crt = os.path.join(d, safe + ".crt")
     h_key = os.path.join(d, safe + ".key")
     if os.path.exists(h_crt) and os.path.exists(h_key):
-        return h_crt, h_key
+        return h_crt, h_key  # legacy openssl pair
+    if os.path.exists(h_crt):
+        return h_crt, _host_key_path()  # pure-python cert + shared key
+    try:
+        from . import x509
+        ca_key = x509.parse_rsa_private_pem(open(key).read())
+        host_key = x509.parse_rsa_private_pem(open(_host_key_path()).read())
+        h_der = x509.make_host_cert(host, host_key, CA_CN, ca_key)
+        with open(h_crt, "w") as f:
+            f.write(x509.pem_encode("CERTIFICATE", h_der))
+        return h_crt, _host_key_path()
+    except Exception:
+        return _host_cert_openssl(host, crt, key, d, safe)
+
+
+def _host_cert_openssl(host, crt, key, d, safe):
+    """Fallback: original openssl-based per-host cert."""
+    h_crt = os.path.join(d, safe + ".crt")
+    h_key = os.path.join(d, safe + ".key")
     csr = os.path.join(d, safe + ".csr")
     ext = os.path.join(d, safe + ".ext")
     subprocess.run(

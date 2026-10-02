@@ -10,6 +10,8 @@ forwarded as real mouse clicks into Chromium.
 Binds to 127.0.0.1 by default. Do NOT expose to a network without auth.
 """
 
+import html as _html
+import json
 import re
 import threading
 import time
@@ -29,9 +31,10 @@ def _abs(base, url):
 
 
 def rewrite_html(html, page_url, gw=GW):
-    """gw: absolute gateway base, e.g. http://127.0.0.1:8901/__kancil__.
+    """Inject <base>, toolbar, agent.js; route links/forms through the gateway.
+
+    gw: absolute gateway base, e.g. http://127.0.0.1:8901/__kancil__.
     Must be absolute: pages carry a <base> tag pointing at the origin."""
-    """Inject <base>, toolbar, and route links/forms through the gateway."""
     if isinstance(html, bytes):
         html = html.decode("utf-8", errors="replace")
 
@@ -180,7 +183,6 @@ def _extract_video_id(target):
 
 def player_page(vid, title="", channel="", thumb=""):
     """Mini player page: official YouTube embed (audio+video, fullscreen)."""
-    import html as _html
     title = _html.escape(title or vid)
     channel = _html.escape(channel or "")
     thumb_tag = ('<meta property="og:image" content="%s">' % _html.escape(thumb)
@@ -236,11 +238,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _json(self, obj, code=200):
-        import json
         self._send(code, json.dumps(obj), "application/json")
 
     def _read_json(self):
-        import json
         try:
             n = int(self.headers.get("Content-Length", 0) or 0)
         except Exception:
@@ -308,11 +308,8 @@ class _Handler(BaseHTTPRequestHandler):
         # ---- level 1: injected JS agent (shared routing) ----
         if action.startswith("agent"):
             from .agent_bridge import route_agent
-            import urllib.parse as _up
-            routed = route_agent(path, {k: v[0] for k, v in
-                                        _up.parse_qs(
-                                            _up.urlsplit(self.path).query
-                                        ).items()},
+            routed = route_agent(path,
+                                 {k: v[0] for k, v in q.items()},
                                  self._read_json() if self.command == "POST"
                                  else {})
             if routed is not None:
