@@ -29,6 +29,8 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
+import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
@@ -62,6 +64,7 @@ public class MainActivity extends Activity {
     private FrameLayout webContainer;
     private EditText urlBar;
     private Button tabCountBtn;
+    private ProgressBar progressBar;
     private TextView agentStatus;
     private TextView agentToast;    private final Handler ui = new Handler(Looper.getMainLooper());
     private final Handler toastHide = new Handler(Looper.getMainLooper());
@@ -102,16 +105,15 @@ public class MainActivity extends Activity {
         webContainer = findViewById(R.id.web_container);
         urlBar = findViewById(R.id.url_bar);
         tabCountBtn = findViewById(R.id.btn_tabs);
+        progressBar = findViewById(R.id.progress);
         agentStatus = findViewById(R.id.agent_status);
         agentToast = findViewById(R.id.agent_toast);
         prefs = getSharedPreferences("kancil", MODE_PRIVATE);
+        getWindow().setStatusBarColor(0xFF0E6B2E);
 
         findViewById(R.id.btn_back).setOnClickListener(v -> goBack());
         findViewById(R.id.btn_fwd).setOnClickListener(v -> goForward());
-        findViewById(R.id.btn_reload).setOnClickListener(v -> activeWeb().reload());
-        findViewById(R.id.btn_newtab).setOnClickListener(v ->
-                newTab(homeUrl(), false));
-        findViewById(R.id.btn_settings).setOnClickListener(v -> showSettings());
+        findViewById(R.id.btn_menu).setOnClickListener(v -> showMenu(v));
         tabCountBtn.setOnClickListener(v -> showTabSwitcher());
         urlBar.setOnEditorActionListener((v, actionId, ev) -> {
             if (actionId == EditorInfo.IME_ACTION_GO) {
@@ -340,20 +342,6 @@ public class MainActivity extends Activity {
         root.addView(cbDesk);
         root.addView(cbDark);
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        Button bReader = new Button(this);
-        bReader.setText("Reader");
-        bReader.setOnClickListener(v -> toggleReader());
-        Button bFind = new Button(this);
-        bFind.setText("Cari");
-        bFind.setOnClickListener(v -> showFindDialog());
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
-        row.addView(bReader, lp);
-        row.addView(bFind, lp);
-        root.addView(row);
-
         ScrollView sv = new ScrollView(this);
         sv.addView(root);
 
@@ -482,6 +470,47 @@ public class MainActivity extends Activity {
         d.show();
     }
 
+    private void showMenu(View anchor) {
+        PopupMenu pm = new PopupMenu(this, anchor);
+        pm.getMenu().add("Reload");
+        pm.getMenu().add("Tab baru");
+        pm.getMenu().add("Reader mode");
+        pm.getMenu().add("Cari di halaman");
+        pm.getMenu().add("Download");
+        pm.getMenu().add("Pengaturan");
+        pm.setOnMenuItemClickListener(item -> {
+            String t = String.valueOf(item.getTitle());
+            switch (t) {
+                case "Reload":
+                    activeWeb().reload();
+                    break;
+                case "Tab baru":
+                    newTab(homeUrl(), false);
+                    break;
+                case "Reader mode":
+                    toggleReader();
+                    break;
+                case "Cari di halaman":
+                    showFindDialog();
+                    break;
+                case "Download":
+                    try {
+                        startActivity(new android.content.Intent(
+                                DownloadManager.ACTION_VIEW_DOWNLOADS));
+                    } catch (Exception e) {
+                        Toast.makeText(this, "Tidak ada app download",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                    break;
+                case "Pengaturan":
+                    showSettings();
+                    break;
+            }
+            return true;
+        });
+        pm.show();
+    }
+
     private void showTabSwitcher() {
         final List<Tab> copy = new ArrayList<>(tabs);
         String[] names = new String[copy.size() + 1];
@@ -554,6 +583,18 @@ public class MainActivity extends Activity {
                 if (tab == active) ui.post(() -> {
                     urlBar.setText(url);
                     agentStatus.setText("Agent :8080");
+                    progressBar.setVisibility(View.VISIBLE);
+                    progressBar.setProgress(10);
+                    if (favicon != null) {
+                        android.graphics.drawable.BitmapDrawable d =
+                                new android.graphics.drawable.BitmapDrawable(
+                                        getResources(), favicon);
+                        urlBar.setCompoundDrawablesWithIntrinsicBounds(
+                                d, null, null, null);
+                    } else {
+                        urlBar.setCompoundDrawablesWithIntrinsicBounds(
+                                0, 0, 0, 0);
+                    }
                 });
             }
 
@@ -562,6 +603,7 @@ public class MainActivity extends Activity {
                 if (tab == active) ui.post(() -> {
                     urlBar.setText(url);
                     if (!tab.title.isEmpty()) setTitle(tab.title);
+                    progressBar.setVisibility(View.GONE);
                 });
                 if (dark()) {
                     v.evaluateJavascript(DARK_ON, null);
@@ -587,6 +629,18 @@ public class MainActivity extends Activity {
             public void onReceivedTitle(WebView v, String title) {
                 tab.title = title == null ? "" : title;
                 if (tab == active) setTitle(tab.title);
+            }
+
+            @Override
+            public void onProgressChanged(WebView v, int progress) {
+                if (tab == active) ui.post(() -> {
+                    if (progress >= 100) {
+                        progressBar.setVisibility(View.GONE);
+                    } else {
+                        progressBar.setVisibility(View.VISIBLE);
+                        progressBar.setProgress(progress);
+                    }
+                });
             }
         };
     }

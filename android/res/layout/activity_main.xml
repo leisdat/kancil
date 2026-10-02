@@ -10,7 +10,7 @@
         android:orientation="horizontal"
         android:padding="6dp"
         android:gravity="center_vertical"
-        android:background="#FAFAFA">
+        android:background="#FFFFFF">
 
         <ImageButton
             android:id="@+id/btn_back"
@@ -33,21 +33,14 @@
             android:layout_width="0dp"
             android:layout_height="40dp"
             android:layout_weight="1"
-            android:background="@android:drawable/edit_text"
-            android:hint="Search or enter URL"
+            android:background="@drawable/url_bg"
+            android:hint="Cari atau ketik URL"
             android:singleLine="true"
             android:imeOptions="actionGo"
             android:textSize="14sp"
-            android:paddingLeft="12dp"
-            android:paddingRight="12dp" />
-
-        <ImageButton
-            android:id="@+id/btn_reload"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_popup_sync"
-            android:contentDescription="Reload" />
+            android:paddingLeft="16dp"
+            android:paddingRight="16dp"
+            android:drawablePadding="8dp" />
 
         <Button
             android:id="@+id/btn_tabs"
@@ -56,24 +49,29 @@
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:text="1"
             android:textSize="14sp"
+            android:textColor="#137333"
             android:contentDescription="Tabs" />
 
-        <ImageButton
-            android:id="@+id/btn_newtab"
+        <Button
+            android:id="@+id/btn_menu"
             android:layout_width="40dp"
             android:layout_height="40dp"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_input_add"
-            android:contentDescription="New tab" />
-
-        <ImageButton
-            android:id="@+id/btn_settings"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_menu_preferences"
-            android:contentDescription="Settings" />
+            android:text="⋮"
+            android:textSize="20sp"
+            android:textColor="#5F6368"
+            android:contentDescription="Menu" />
     </LinearLayout>
+
+    <ProgressBar
+        android:id="@+id/progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="3dp"
+        android:max="100"
+        android:progress="0"
+        android:progressTint="#1EA446"
+        android:visibility="gone" />
 
     <FrameLayout
         android:layout_width="match_parent"
@@ -92,14 +90,14 @@
             android:layout_marginTop="8dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:background="#E6F4EA"
-            android:paddingLeft="10dp"
-            android:paddingRight="10dp"
+            android:background="@drawable/pill_bg"
+            android:elevation="4dp"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
             android:paddingTop="6dp"
             android:paddingBottom="6dp">
 
             <View
-                android:id="@+id/agent_dot"
                 android:layout_width="8dp"
                 android:layout_height="8dp"
                 android:background="#1EA446" />
@@ -123,7 +121,7 @@
             android:background="#CC202124"
             android:textColor="#E8EAED"
             android:textSize="11sp"
-            android:padding="8dp"
+            android:padding="10dp"
             android:visibility="gone"
             android:fontFamily="monospace" />
     </FrameLayout>
