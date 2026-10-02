@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Kancil runtime state (per-user, never commit)
+.kancil/
+crawl-*.txt
+
+# OS / editors
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Secrets
+*.key
+ca.crt
