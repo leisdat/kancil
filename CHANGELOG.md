@@ -1,5 +1,24 @@
 # Changelog — Kancil
 
+## 3.4.1 (2026-10-02)
+
+Termux-friendly: playwright engine sekarang dukung browser custom & aman
+dari LD_PRELOAD.
+
+### Added
+- `--pw-browser {chromium,firefox,webkit}` + `--executable-path PATH`
+  (atau env `KANCIL_BROWSER_PATH`): pakai binary browser sendiri, mis.
+  Camoufox yang ke-cache di Termux:
+  `kancil --engine playwright --pw-browser firefox --executable-path
+  /data/data/com.termux/cache/camoufox/browsers/.../firefox`
+- Playwright engine otomatis menghapus `LD_PRELOAD` dari environment
+  browser child (memperbaiki crash `CANNOT LINK EXECUTABLE:
+  libtermux-exec.so` di Termux).
+
+### Fixed
+- `kancil proxy-ca` tanpa openssl sekarang kasih pesan jelas:
+  `pkg install openssl` (Termux) / `apt install openssl` (Debian/Ubuntu).
+
 ## 3.4.0 (2026-10-02)
 
 Browser beneran, kancil tetap kecil: Chrome HP jadi mesin render, kancil

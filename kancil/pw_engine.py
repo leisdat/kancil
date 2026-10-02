@@ -6,6 +6,7 @@ Works in Termux via proot-distro Ubuntu (ARM64).
 Honest capabilities: real JS, screenshots, real localStorage/IndexedDB,
 network interception, console capture, bounding boxes.
 """
+import os
 import time
 
 from . import engines
@@ -33,7 +34,8 @@ class PlaywrightEngine(engines.StaticEngine):
     }
 
     def __init__(self, timeout=25, headless=True, proxy=None, user_agent=None,
-                 storage_state=None, viewport=None):
+                 storage_state=None, viewport=None, browser="chromium",
+                 executable_path=None):
         # don't call StaticEngine.__init__ (we override networking),
         # but set the attributes its shared helpers need
         import http.cookiejar
@@ -72,11 +74,28 @@ class PlaywrightEngine(engines.StaticEngine):
             launch_kw = {"headless": headless}
             if proxy:
                 launch_kw["proxy"] = {"server": proxy}
-            self._browser = self._pw.chromium.launch(**launch_kw)
+            if executable_path:
+                launch_kw["executable_path"] = executable_path
+            # Termux exports LD_PRELOAD=libtermux-exec.so, which breaks
+            # Chromium/Firefox child processes (CANNOT LINK EXECUTABLE).
+            # Strip it from the browser's environment only.
+            if "LD_PRELOAD" in os.environ:
+                launch_kw["env"] = {k: v for k, v in os.environ.items()
+                                    if k != "LD_PRELOAD"}
+            launcher = getattr(self._pw, browser, None)
+            if launcher is None:
+                raise engines.EngineError(
+                    "unknown playwright browser %r (choose chromium, firefox, webkit)"
+                    % browser)
+            self._browser = launcher.launch(**launch_kw)
+        except engines.EngineError:
+            self._pw.stop()
+            raise
         except Exception as e:
             self._pw.stop()
-            raise engines.EngineError("chromium launch failed: %s. "
-                                      "Run: playwright install chromium --only-shell" % e)
+            raise engines.EngineError(
+                "%s launch failed: %s. Run: playwright install %s"
+                % (browser, e, browser))
         self._ctx = self._browser.new_context(
             viewport=self.viewport, user_agent=self.ua,
             **({"storage_state": storage_state} if storage_state else {}))

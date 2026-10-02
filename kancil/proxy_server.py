@@ -57,7 +57,9 @@ def openssl_ok():
 def ensure_ca():
     """Generate the MITM CA (needs openssl CLI). Returns (crt, key)."""
     if not openssl_ok():
-        raise RuntimeError("openssl CLI not found — install it first")
+        raise RuntimeError("openssl CLI not found — install it first "
+                           "(Termux: pkg install openssl; "
+                           "Debian/Ubuntu: sudo apt install openssl)")
     crt, key = ca_paths()
     if os.path.exists(crt) and os.path.exists(key):
         return crt, key

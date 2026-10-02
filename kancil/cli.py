@@ -20,10 +20,15 @@ def get_browser(args):
     proxy = getattr(args, "proxy", None) or st.get("proxy")
     ua = getattr(args, "ua", None) or st.get("ua")
     pw_session = getattr(args, "session", None)
+    pw_browser = (getattr(args, "pw_browser", None)
+                  or os.environ.get("KANCIL_PW_BROWSER", "chromium"))
+    pw_executable_path = (getattr(args, "executable_path", None)
+                          or os.environ.get("KANCIL_BROWSER_PATH"))
     b = Kancil(engine=engine, timeout=st.get("timeout", 25),
                retries=st.get("retries", 2),
                cookie_file=cookie_file, profile=st.get("profile", {}),
-               proxy=proxy, ua=ua, pw_session=pw_session)
+               proxy=proxy, ua=ua, pw_session=pw_session,
+               pw_browser=pw_browser, pw_executable_path=pw_executable_path)
     b.import_state(st)
     return b, st
 
@@ -85,6 +90,13 @@ def _common_flags(ap, suppress=False):
     ap.add_argument("--raw", action="store_true", default=d, help="raw data only")
     ap.add_argument("--engine", choices=["static", "playwright"],
                     default=argparse.SUPPRESS if suppress else None)
+    ap.add_argument("--pw-browser", choices=["chromium", "firefox", "webkit"],
+                    default=argparse.SUPPRESS if suppress else None,
+                    help="playwright browser type (default chromium)")
+    ap.add_argument("--executable-path",
+                    default=argparse.SUPPRESS if suppress else None,
+                    help="custom browser binary (e.g. Camoufox firefox). "
+                         "Env KANCIL_BROWSER_PATH works too.")
     ap.add_argument("--timeout", type=int, default=argparse.SUPPRESS if suppress else None)
     ap.add_argument("--retries", type=int, default=argparse.SUPPRESS if suppress else None)
     ap.add_argument("--proxy", default=argparse.SUPPRESS if suppress else None,
