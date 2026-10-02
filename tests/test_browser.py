@@ -81,6 +81,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(body)
         elif self.path == "/robots.txt":
             self._send(b"User-agent: *\nDisallow: /private\n", "text/plain")
+        elif self.path == "/etag":
+            if self.headers.get("If-None-Match") == '"v1"':
+                self._send(b"", status=304)
+            else:
+                self._send(b"<html><body><h1>etag page</h1></body></html>",
+                           extra=[("ETag", '"v1"')])
+        elif self.path == "/nostore":
+            self._send(b"<html><body><h1>no store</h1></body></html>",
+                       extra=[("Cache-Control", "no-store"),
+                              ("ETag", '"x"')])
         elif self.path == "/sitemap.xml":
             host = self.headers.get("Host", "127.0.0.1")
             body = ('<sitemapindex xmlns="http://www.sitemaps.org/schemas/'
@@ -1942,6 +1952,105 @@ class SlimLevel2Test(unittest.TestCase):
                  "-ext", "subjectAltName"],
                 capture_output=True, text=True, timeout=30)
             self.assertIn("DNS:example.com", out.stdout)
+
+
+class OptimizeTest(unittest.TestCase):
+    """v3.11.0: article field splitting, HTTP cache, DNS cache."""
+
+    @classmethod
+    def setUpClass(cls):
+        from kancil import session as session_mod
+        cls._old_base = session_mod.BASE
+        cls.tmp = tempfile.mkdtemp()
+        session_mod.BASE = os.path.join(cls.tmp, ".kancil")
+        cls.port = free_port()
+        cls.srv = http.server.HTTPServer(("127.0.0.1", cls.port), Handler)
+        cls.th = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.th.start()
+        cls.base = "http://127.0.0.1:%d" % cls.port
+
+    @classmethod
+    def tearDownClass(cls):
+        from kancil import session as session_mod
+        session_mod.BASE = cls._old_base
+        cls.srv.shutdown()
+
+    def setUp(self):
+        self.b = Kancil(engine="static", timeout=10, retries=0)
+
+    def tearDown(self):
+        self.b.close()
+
+    def test_article_item_split(self):
+        from kancil.dom import build_dom, select_one
+        from kancil.devtools import _article_item
+        html = ('<article><div><a href="/manga/x/">'
+                '<img data-src="http://img/x.jpg"></a><span>1</span></div>'
+                '<div><h4><a href="/manga/x/">Overgeared New</a></h4>'
+                '<span>Fantasi \u00b7 73,571 views</span><br>'
+                '<a href="/x-chapter-341/">Chapter 341</a></div></article>')
+        a = select_one(build_dom(html), "article")
+        it = _article_item(a, "https://komiku.org/")
+        self.assertEqual(it["title"], "Overgeared New")
+        self.assertEqual(it["url"], "https://komiku.org/manga/x/")
+        self.assertEqual(it["image"], "http://img/x.jpg")
+        self.assertEqual(it["meta"], "Fantasi \u00b7 73,571 views")
+        self.assertEqual(len(it["links"]), 1)
+        self.assertEqual(it["links"][0]["text"], "Chapter 341")
+        self.assertIn("text", it)  # backward compat field kept
+
+    def test_article_item_no_heading(self):
+        from kancil.dom import build_dom, select_one
+        from kancil.devtools import _article_item
+        html = ('<article><a href="/p1">Read more about Cats</a>'
+                '<p>Some filler text here.</p></article>')
+        a = select_one(build_dom(html), "article")
+        it = _article_item(a, "https://h.test/")
+        self.assertEqual(it["title"], "Read more about Cats")
+        self.assertEqual(it["url"], "https://h.test/p1")
+
+    def test_http_cache_304(self):
+        self.b.open(self.base + "/etag")
+        self.assertIsNone(self.b.engine.netlog[-1].get("from_cache"))
+        self.b.open(self.base + "/etag")
+        e = self.b.engine.netlog[-1]
+        self.assertEqual(e["status"], 304)
+        self.assertTrue(e.get("from_cache"))
+        self.assertEqual(self.b.engine.page.title, "etag page")
+
+    def test_http_cache_no_store(self):
+        self.b.open(self.base + "/nostore")
+        self.b.open(self.base + "/nostore")
+        self.assertIsNone(self.b.engine.netlog[-1].get("from_cache"))
+
+    def test_http_cache_stats_clear(self):
+        self.b.open(self.base + "/etag")
+        r = self.b.tool({"action": "http_cache"})
+        self.assertTrue(r["success"], r)
+        self.assertGreater(r["files"], 0)
+        self.assertTrue(r["enabled"])
+        rc = self.b.http_cache(action="clear")
+        self.assertTrue(rc["success"])
+        self.assertGreaterEqual(rc["cleared"], 2)
+
+    def test_http_cache_disabled(self):
+        b2 = Kancil(engine="static", timeout=10, retries=0, cache=False)
+        try:
+            b2.open(self.base + "/etag")
+            b2.open(self.base + "/etag")
+            self.assertIsNone(b2.engine.netlog[-1].get("from_cache"))
+        finally:
+            b2.close()
+
+    def test_dns_cache_installed(self):
+        import socket as _sock
+        from kancil import engines
+        self.assertTrue(engines._dns_installed)
+        self.assertEqual(_sock.getaddrinfo.__name__, "cached")
+        # functional: repeated lookup works
+        r1 = _sock.getaddrinfo("127.0.0.1", 80)
+        r2 = _sock.getaddrinfo("127.0.0.1", 80)
+        self.assertEqual(r1, r2)
 
 
 if __name__ == "__main__":

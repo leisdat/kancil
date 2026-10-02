@@ -21,6 +21,41 @@ import urllib.request
 from .dom import (build_dom, extract_title, render_text, select, select_one,
                   smart_resolve, xpath, a11y_items, inspect_element,
                   generate_css, Node)
+from . import httpcache
+
+
+# ---------------- tiny DNS cache ----------------
+# urllib -> http.client -> socket.getaddrinfo on every new connection.
+# A 5-minute TTL cache here saves real lookups for workers crawling many
+# hosts. Process-global, lock-guarded, bounded; worst case 5-min stale DNS.
+
+_dns_cache = {}
+_dns_lock = threading.Lock()
+_dns_installed = False
+_orig_getaddrinfo = socket.getaddrinfo
+
+
+def _install_dns_cache(ttl=300):
+    global _dns_installed
+    if _dns_installed:
+        return
+
+    def cached(host, port, *a, **k):
+        key = (host, port)
+        now = time.time()
+        with _dns_lock:
+            e = _dns_cache.get(key)
+            if e is not None and e[0] > now:
+                return e[1]
+        res = _orig_getaddrinfo(host, port, *a, **k)
+        with _dns_lock:
+            if len(_dns_cache) > 2000:
+                _dns_cache.clear()
+            _dns_cache[key] = (now + ttl, res)
+        return res
+
+    socket.getaddrinfo = cached
+    _dns_installed = True
 
 UA_DEFAULT = ("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36")
@@ -369,10 +404,12 @@ class StaticEngine:
     }
 
     def __init__(self, cookie_file=None, user_agent=UA_DEFAULT,
-                 timeout=25, retries=2, proxy=None):
+                 timeout=25, retries=2, proxy=None, cache=True):
         self.timeout = timeout
         self.retries = retries
         self.ua = user_agent or UA_DEFAULT
+        self.cache_enabled = bool(cache)
+        _install_dns_cache()
         self.proxy = proxy
         self.jar = http.cookiejar.LWPCookieJar(cookie_file) if cookie_file else http.cookiejar.CookieJar()
         if cookie_file:
@@ -550,6 +587,9 @@ class StaticEngine:
             headers = {"User-Agent": self.ua}
             headers.update(self.BROWSER_HEADERS)
             headers.update(extra_headers or {})
+            use_cache = self.cache_enabled and not data
+            if use_cache:
+                headers.update(httpcache.conditional_headers(url))
             req = urllib.request.Request(url, data=data, headers=headers)
             entry = {"t": time.strftime("%H:%M:%S"),
                      "started": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -582,8 +622,24 @@ class StaticEngine:
                                   "res_body": body, "res_truncated": trunc})
                     entry["timing"]["duration"] = entry["ms"]
                     self._log(entry)
+                    if use_cache:
+                        httpcache.store(url, r.geturl(), r.status,
+                                        dict(r.headers.items()), raw)
                     return r.geturl(), r.status, r.headers.get_content_type(), raw, dict(r.headers.items())
             except urllib.error.HTTPError as e:
+                if e.code == 304 and use_cache:
+                    hit = httpcache.cached_response(url)
+                    if hit is not None:
+                        final, _st, ctype, raw, rh = hit
+                        entry.update({"url": final, "status": 304,
+                                      "ctype": ctype, "size": len(raw),
+                                      "response_size": 0,
+                                      "ms": int((time.time() - t0) * 1000),
+                                      "res_headers": dict(rh),
+                                      "from_cache": True})
+                        entry["timing"]["duration"] = entry["ms"]
+                        self._log(entry)
+                        return final, 200, ctype, raw, dict(rh)
                 entry.update({"status": e.code, "ms": int((time.time() - t0) * 1000)})
                 entry["timing"]["duration"] = entry["ms"]
                 try:

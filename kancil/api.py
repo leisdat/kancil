@@ -32,10 +32,11 @@ class Kancil:
     def __init__(self, engine="static", timeout=25, retries=2,
                  cookie_file=None, profile=None, proxy=None, ua=None,
                  pw_session=None, pw_browser="chromium",
-                 pw_executable_path=None):
+                 pw_executable_path=None, cache=True):
         self.profile = profile or {}
         self.proxy = proxy
         self.ua = ua
+        self.cache = cache
         self.pw_session = pw_session
         self.pw_browser = pw_browser
         self.pw_executable_path = pw_executable_path
@@ -61,7 +62,8 @@ class Kancil:
         return engines.StaticEngine(timeout=timeout, retries=retries,
                                     cookie_file=cookie_file,
                                     proxy=self.proxy,
-                                    user_agent=self.ua or engines.UA_DEFAULT)
+                                    user_agent=self.ua or engines.UA_DEFAULT,
+                                    cache=self.cache)
 
     @property
     def capabilities(self):
@@ -479,7 +481,8 @@ class Kancil:
 
             def factory(base=base):
                 return StaticEngine(user_agent=base.ua, timeout=base.timeout,
-                                    retries=0, proxy=base.proxy)
+                                    retries=0, proxy=base.proxy,
+                                    cache=base.cache_enabled)
             res = scrape_url_list(
                 url_list, factory, selector=selector, fields=fields,
                 auto=auto, max_items=max_items, workers=workers,
@@ -661,6 +664,15 @@ class Kancil:
         res = fetch_sitemap_urls(start, max_urls=max_urls)
         return ok(url=start, count=len(res["urls"]), urls=res["urls"],
                   sitemaps=res["sitemaps"], truncated=res["truncated"])
+
+    def http_cache(self, action="stats"):
+        """Inspect/clear the static engine's HTTP cache (ETag/Last-Modified)."""
+        from . import httpcache
+        if action == "clear":
+            return ok(cleared=httpcache.clear())
+        n, size = httpcache.stats()
+        return ok(files=n, bytes=size,
+                  enabled=bool(getattr(self.engine, "cache_enabled", False)))
 
     def yt_search(self, query, max_results=20):
         """YouTube search via ytInitialData (no JS needed).
@@ -1420,6 +1432,7 @@ Kancil._TOOL_ACTIONS = {
     "structured": lambda s, p: s.structured(),
     "sitemap": lambda s, p: s.sitemap(url=p.get("url"),
                                      max_urls=int(p.get("max_urls", 5000))),
+    "http_cache": lambda s, p: s.http_cache(action=p.get("action", "stats")),
     "yt_search": lambda s, p: s.yt_search(p.get("query", ""),
                                           int(p.get("max_results", 20))),
     "yt_video": lambda s, p: s.yt_video(p.get("url", "")),

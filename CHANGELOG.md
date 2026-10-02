@@ -1,5 +1,27 @@
 # Changelog — Kancil
 
+## 3.11.0 (2026-10-02)
+
+Tiga optimasi sekaligus.
+
+### Added
+- Auto-scrape `articles` dirombak: judul diambil dari heading link
+  (h1-h4), link lain dipisah (teks + URL), thumbnail dari
+  `data-src`/`src`, sisa teks jadi `meta`, nomor rank di-strip.
+  `"1Overgeared NewFantasi · 74,276 viewsChapter 341"` ->
+  `title="Overgeared New"`, `meta="Fantasi · 74,276 views"`,
+  `links=[Chapter 341]`. Field `text` lama tetap ada (kompatibel).
+- HTTP cache (`kancil/httpcache.py`): ETag / Last-Modified revalidation
+  untuk static engine. 304 -> body dari cache (`~/.kancil/cache/`,
+  cap 50 MB). Hormati `Cache-Control: no-store`. `--no-cache` untuk
+  bypass; `kancil http-cache [stats|clear]` + tool action `http_cache`.
+- DNS cache: `socket.getaddrinfo` di-wrap dengan TTL 5 menit
+  (lock-guarded, max 2000 entri). Otomatis aktif di static engine.
+
+### Notes
+- 143 unit tests hijau (7 baru). Cache tidak pernah stale: entri tanpa
+  validator tidak disimpan, jadi tiap hit selalu revalidasi (304 murah).
+
 ## 3.10.0 (2026-10-02)
 
 Level 2 tanpa openssl, Level 1 dirampingkan.

@@ -28,7 +28,8 @@ def get_browser(args):
                retries=st.get("retries", 2),
                cookie_file=cookie_file, profile=st.get("profile", {}),
                proxy=proxy, ua=ua, pw_session=pw_session,
-               pw_browser=pw_browser, pw_executable_path=pw_executable_path)
+               pw_browser=pw_browser, pw_executable_path=pw_executable_path,
+               cache=not getattr(args, "no_cache", False))
     b.import_state(st)
     return b, st
 
@@ -115,6 +116,10 @@ def _common_flags(ap, suppress=False):
     ap.add_argument("--session", default=argparse.SUPPRESS if suppress else None,
                     help="named persistent session: playwright storage_state "
                          "is loaded at start and saved at exit")
+    ap.add_argument("--no-cache", action="store_true",
+                    default=argparse.SUPPRESS if suppress else False,
+                    help="disable the static engine's HTTP cache "
+                         "(ETag/Last-Modified revalidation)")
     return ap
 
 
@@ -325,6 +330,9 @@ def build_parser():
     sm = SP("sitemap", help="list page URLs from sitemap.xml")
     sm.add_argument("url", nargs="?")
     sm.add_argument("--max-urls", type=int, default=5000, dest="max_urls")
+    hc = SP("http-cache", help="inspect/clear the HTTP cache")
+    hc.add_argument("action", nargs="?", choices=["stats", "clear"],
+                    default="stats")
 
     vw = SP("view", help="local viewer: see the page in your browser, "
                          "take over navigation (static) or live screen "
@@ -524,6 +532,8 @@ def dispatch(b, args):
         return b.structured()
     if c == "sitemap":
         return b.sitemap(url=args.url, max_urls=args.max_urls)
+    if c == "http-cache":
+        return b.http_cache(action=args.action)
     if c == "extract":
         return b.extract(mode=args.mode)
     if c == "a11y":

@@ -57,7 +57,7 @@ redaction on by default, header inspection.
 **Scraper** — pagination (numbered/next/infinite-scroll), dedup, robots.txt,
 `extract` (article/links/images/tables).
 
-**Agent Tool Interface** — 73 actions, JSON-in/JSON-out, structured error
+**Agent Tool Interface** — 74 actions, JSON-in/JSON-out, structured error
 codes (`ELEMENT_NOT_FOUND`, `TIMEOUT`, …). Built for LLM agents.
 `batch` runs many actions in one call; `network_curl` replays any logged
 request as a copy-pasteable curl command.
@@ -116,7 +116,7 @@ kancil serve-proxy --mitm             # set WiFi proxy -> 127.0.0.1:8080
 ## Tests
 
 ```
-136 unit tests (stdlib unittest) + 5 live tests (public URLs, real Chromium)
+143 unit tests (stdlib unittest) + 5 live tests (public URLs, real Chromium)
 $ python3 -m unittest tests.test_browser
 $ python3 -m unittest tests.test_live      # needs network + chromium
 ```

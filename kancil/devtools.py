@@ -43,18 +43,62 @@ def _text_len(node):
     return len(node.text_content())
 
 
+def _article_item(a, base_url):
+    """Split an <article> into title / url / links / image / meta.
+
+    Generic DOM patterns (no per-site rules): the title comes from the
+    heading link (or the longest link text), other links are listed
+    separately, and leftover text becomes meta. This avoids the classic
+    auto-scrape mush like "1Overgeared NewFantasi · 74,276 viewsChapter 341".
+    """
+    h = select_one(a, "h1, h2, h3, h4")
+    h_link = select_one(h, "a[href]") if h is not None else None
+    links = []
+    seen_u = set()
+    for l in select(a, "a[href]"):
+        href = (l.get("href") or "").strip()
+        if not href or href.lower().startswith(("javascript:", "#")):
+            continue
+        u = urllib.parse.urljoin(base_url, href)
+        t = re.sub(r"\s+", " ", l.text_content() or "").strip()
+        if u not in seen_u:
+            seen_u.add(u)
+            links.append((t, u))
+    img = select_one(a, "img")
+    image = ""
+    if img is not None:
+        image = urllib.parse.urljoin(
+            base_url, img.get("data-src") or img.get("src") or "")
+    if h_link is not None and (h_link.text_content() or "").strip():
+        title = re.sub(r"\s+", " ", h_link.text_content()).strip()
+        url = urllib.parse.urljoin(base_url, h_link.get("href"))
+    elif h is not None and (h.text_content() or "").strip():
+        title = re.sub(r"\s+", " ", h.text_content()).strip()
+        url = links[0][1] if links else ""
+    elif links:
+        title, url = max(links, key=lambda x: len(x[0]))
+    else:
+        title, url = "", ""
+    # meta: item text minus title and link texts
+    meta = a.text_content() or ""
+    for chunk in [title] + [t for t, _ in links]:
+        if chunk:
+            meta = meta.replace(chunk, " ", 1)
+    meta = re.sub(r"\s+", " ", meta).strip()
+    meta = re.sub(r"^\d{1,4}\s+", "", meta)  # leading rank/badge number
+    return {"title": title[:160], "url": url,
+            "links": [{"text": t[:80], "url": u} for t, u in links[:10]
+                      if u != url and t],
+            "image": image, "meta": meta[:300],
+            "text": re.sub(r"\s+", " ", a.text_content() or "").strip()[:600]}
+
+
 def scrape_auto(root, base_url):
     """Detect common structures: articles, products/cards, tables, images, links."""
     found = {"articles": [], "products": [], "tables": [], "images": [], "links": []}
     # articles
     for a in select(root, "article"):
-        h = select_one(a, "h1, h2, h3")
-        link = select_one(a, "a[href]")
-        found["articles"].append({
-            "title": h.text_content()[:120] if h else a.text_content()[:120],
-            "url": urllib.parse.urljoin(base_url, link.get("href")) if link else "",
-            "text": a.text_content()[:600],
-        })
+        found["articles"].append(_article_item(a, base_url))
     # product/card-like: repeated divs with img + price-ish text
     for sel in (".product", ".card", ".item", "[class*=card]", "[class*=product]"):
         try:
