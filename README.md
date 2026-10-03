@@ -78,11 +78,14 @@ call; `network_curl` replays any logged request as curl.
 screenshots, PDF. Same API. Auto-detects Camoufox on Termux.
 
 **📱 WebView engine (new)** — `--engine webview` drives the
-**Kancil Browser** Android app (`android/`, ~73 KB APK) on the same phone:
+**Kancil Browser** Android app (`android/`, ~81 KB APK) on the same phone:
 real Chromium via System WebView. Log in / solve captchas once in the app,
 the Termux agent reuses that live session. Includes JS console capture,
-pattern-based request blocking (`kancil block add <pattern>`), and native
-full-page screenshots — all agent-controlled, zero new dependencies.
+pattern-based request blocking (`kancil block add <pattern>`), native
+full-page + element screenshots, video listing, form fill, file upload,
+download manager — all agent-controlled, zero new dependencies. A foreground
+service ("Jaga agent tetap hidup") keeps the app alive against MIUI/EMUI
+task killers.
 
 ## Quickstart
 
@@ -118,6 +121,12 @@ kancil daemon stop                    # stop it (state is saved)
 
 # drive the phone's real browser app (install android/kancil-browser.apk first)
 kancil open --engine webview https://example.com
+kancil --engine webview shell    # stable session: one process, no stale tabs
+kancil --engine webview videos   # list <video> elements + direct src URLs
+kancil --engine webview console  # real JS console capture
+kancil --engine webview block add ads.example   # pattern request blocking
+kancil --engine webview download https://example.com/f.zip
+kancil --engine webview upload /sdcard/pic.jpg  # next file-chooser is fed
 
 # watch YouTube, mini style
 kancil yt-play "termux tutorial" --port 8901

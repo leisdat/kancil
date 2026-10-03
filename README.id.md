@@ -99,6 +99,13 @@ Login/captcha cukup sekali di app, agent di Termux pakai session-nya terus:
 > **Stabilitas sesi:** tiap `kancil ...` = proses baru yang baca ulang
 > `/status`. Kalau Android me-recreate app di background, ID tab bisa
 > bergeser — untuk sesi stabil pakai `kancil --engine webview shell`
+> (satu proses) atau `kancil daemon start`. Perintah lain:
+> `videos` (list video + src), `console`, `block add <pola>`,
+> `download <url>`, `upload <path>` (file chooser).
+
+> **Stabilitas sesi:** tiap `kancil ...` = proses baru yang baca ulang
+> `/status`. Kalau Android me-recreate app di background, ID tab bisa
+> bergeser — untuk sesi stabil pakai `kancil --engine webview shell`
 > (satu proses) atau `kancil daemon start`.
 
 ## Troubleshooting (engine webview)
