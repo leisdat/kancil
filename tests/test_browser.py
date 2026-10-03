@@ -2302,6 +2302,11 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
                     self._json({"ok": True, "result": "1"})
             elif "innerText" in expr and "includes" in expr:
                 self._json({"ok": True, "result": "true"})
+            elif "window.scrollY" in expr:
+                self._json({"ok": True, "result": "600"})
+            elif "innerText.length" in expr:
+                # content signal: text_chars|media|feed_markers
+                self._json({"ok": True, "result": "2500|4|1"})
             elif "localStorage" in expr or "sessionStorage" in expr:
                 # empty/blocked storage -> JS null (the real APK returns
                 # the string "null" here)
@@ -2462,6 +2467,64 @@ class WebViewEngineTest(unittest.TestCase):
         r = self.eng.click_through("example.com", "#nope", "#b1", timeout=5)
         self.assertFalse(r["success"])
         self.assertEqual([s[0] for s in r["steps"]], ["open", "click"])
+
+    def test_scroll_settle_and_delta(self):
+        r = self.eng.scroll(600, settle_ms=10)
+        self.assertTrue(r["success"], r)
+        self.assertIn("delta", r)
+        self.assertEqual(r["target"], 600)
+
+    def test_scroll_verify(self):
+        r = self.eng.scroll(600, settle_ms=0, verify="#b1")
+        self.assertTrue(r["success"], r)
+        self.assertTrue(r["verify"])
+
+    def test_content_signal_shell(self):
+        orig = self.eng._post
+        self.eng._post = lambda *a, **k: {"ok": True, "result": "120|0|0"}
+        try:
+            sig = self.eng._content_signal()
+            self.assertTrue(sig["shell"], sig)
+            self.assertEqual(sig["text_chars"], 120)
+        finally:
+            self.eng._post = orig
+
+    def test_content_signal_rich(self):
+        orig = self.eng._post
+        self.eng._post = lambda *a, **k: {"ok": True, "result": "2500|4|1"}
+        try:
+            sig = self.eng._content_signal()
+            self.assertFalse(sig["shell"], sig)
+        finally:
+            self.eng._post = orig
+
+    def test_open_idle_warns_on_shell(self):
+        orig = self.eng._content_signal
+        self.eng._content_signal = lambda: {
+            "text_chars": 50, "media": 0, "feed_markers": 0, "shell": True}
+        try:
+            r = self.eng.open("example.com", idle=True)
+            self.assertTrue(r["success"], r)
+            self.assertIn("warning", r)
+            self.assertIn("login", r["warning"])
+        finally:
+            self.eng._content_signal = orig
+
+    def test_open_idle_no_warning_when_rich(self):
+        r = self.eng.open("example.com", idle=True)
+        self.assertTrue(r["success"], r)
+        # mock content signal falls through to "0|0|0"... just check key
+        self.assertIn("content", r)
+
+    def test_composer_open(self):
+        r = self.eng.composer_open()
+        self.assertTrue(r["success"], r)
+        self.assertEqual([s[0] for s in r["steps"]],
+                         ["open", "click", "wait"])
+
+    def test_composer_open_unknown_site(self):
+        r = self.eng.composer_open(site="twitter")
+        self.assertFalse(r["success"])
 
     def test_screenshot_retries_on_bad_png(self):        # first response is garbage, second is a PNG -> success via retry
         calls = {"n": 0}

@@ -124,7 +124,12 @@ Login/captcha cukup sekali di app, agent di Termux pakai session-nya terus:
 > Navigasi warm SPA dalam satu proses: `click-through <url> <klik-selector>
 > <tunggu-selector>` — buka (settled) → klik → tunggu. Composer m.facebook
 > cuma render lewat klik dari feed, BUKAN lewat URL langsung (SPA butuh warm
-> state dari feed) — berlaku juga buat banyak SPA mobile lain.
+> state dari feed) — `composer-open` udah bake-in flow benernya. Berlaku juga
+> buat banyak SPA mobile lain.
+>
+> Scroll kaya manusia: `scroll 600` nunggu render 800ms + lapor delta
+> (delta 0 = nggak ada konten baru). `open --idle` deteksi "shell kosong"
+> (title render tapi konten nol) → kasih warning login gate.
 >
 > Kalau app crash saat di-drive agent, UncaughtExceptionHandler restart
 > otomatis (max 3x per 5 menit, anti loop) dan stacktrace bisa dibaca via

@@ -152,6 +152,9 @@ kancil --engine webview wait-idle   # same, as a separate step
 kancil --engine webview press Enter            # real KeyboardEvent on focused element
 kancil --engine webview press Escape --selector "#modal"
 kancil --engine webview longpress ".tweet"     # mobile long-press (context menu)
+kancil --engine webview scroll 600 --settle-ms 1200  # scroll + wait render
+kancil --engine webview scroll 600 --verify ".new-post"  # wait for content
+kancil --engine webview composer-open  # m.facebook composer via warm nav
 # dry-run: verify forms/composer freely, clicks+submits are blocked
 # unless you pass --confirm (anti accidental publish)
 kancil --engine webview --dry-run form fill 1 --set "isi=Halo"

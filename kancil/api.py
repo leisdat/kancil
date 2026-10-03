@@ -300,7 +300,11 @@ class Kancil:
     def focus(self, selector):
         return self._wrap(self.engine.focus(selector))
 
-    def scroll(self, target="bottom"):
+    def scroll(self, target="bottom", settle_ms=800, verify=None):
+        if self._engine_name == "webview":
+            return self._wrap(
+                self.engine.scroll(target, settle_ms=settle_ms,
+                                   verify=verify))
         return self._wrap(self.engine.scroll(target))
 
     # ---------- js / wait / console ----------
@@ -337,6 +341,13 @@ class Kancil:
                 timeout=timeout, confirm=confirm))
         return {"success": False,
                 "errors": ["click_through() is webview-engine only"]}
+
+    def composer_open(self, site="facebook", timeout=25):
+        if self._engine_name == "webview":
+            return self._wrap(
+                self.engine.composer_open(site=site, timeout=timeout))
+        return {"success": False,
+                "errors": ["composer_open() is webview-engine only"]}
 
     def console(self):
         return self._wrap(self.engine.console())

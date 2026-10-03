@@ -192,6 +192,8 @@ def build_parser():
     ct.add_argument("--timeout", type=int, default=25)
     ct.add_argument("--confirm", action="store_true",
                     help="required to click in --dry-run mode")
+    SP("composer-open",
+       help="open m.facebook composer via warm nav (feed -> click)")
     SP("wait-idle", help="wait for page settle: readyState + network quiet")
     el = SP("select", help="choose dropdown option")
     el.add_argument("selector")
@@ -204,6 +206,10 @@ def build_parser():
     el.add_argument("selector")
     el = SP("scroll", help="scroll page/element")
     el.add_argument("target", nargs="?", default="bottom")
+    el.add_argument("--settle-ms", type=int, default=800,
+                    help="wait after scroll for content to render")
+    el.add_argument("--verify", default=None,
+                    help="selector/text that must appear after scrolling")
 
     js = SP("js", help="evaluate JavaScript (playwright engine)")
     js.add_argument("expr", nargs=argparse.REMAINDER)
@@ -528,6 +534,8 @@ def dispatch(b, args):
         return b.click_through(args.url, args.click_selector,
                                args.wait_selector, timeout=args.timeout,
                                confirm=args.confirm)
+    if c == "composer-open":
+        return b.composer_open()
     if c == "wait-idle":
         return b.wait_idle()
     if c == "clear":
@@ -541,7 +549,8 @@ def dispatch(b, args):
     if c == "hover":
         return b.hover(args.selector)
     if c == "scroll":
-        return b.scroll(args.target)
+        return b.scroll(args.target, settle_ms=args.settle_ms,
+                        verify=args.verify)
     if c == "js":
         return b.evaluate(" ".join(args.expr))
     if c == "wait":

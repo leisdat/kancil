@@ -144,7 +144,38 @@ class WebViewEngine:
         out.update({"url": final,
                     "title": st.get("title", "") if isinstance(st, dict) else "",
                     "tab": tab_id})
+        if idle:
+            sig = self._content_signal()
+            out["content"] = sig
+            if sig.get("shell"):
+                out["warning"] = (
+                    "page looks like an empty shell (title renders, no "
+                    "content) — likely a login gate. Log in once in the "
+                    "Kancil Browser app, then retry.")
         return out
+
+    def _content_signal(self):
+        """Heuristic: did the page render content, or just a shell?
+        Returns {text_chars, media, feed, shell(bool)}. Soft signal —
+        a login page itself is 'empty' by this measure."""
+        try:
+            r = self._post("/js", {"expr":
+                "(function(){var b=document.body;"
+                "var t=b?b.innerText.length:0;"
+                "var m=document.querySelectorAll('video,img').length;"
+                "var f=document.querySelectorAll('[role=feed],ytd-browse,"
+                "ytd-rich-grid-renderer,[data-pagelet]').length;"
+                "return t+'|'+m+'|'+f})()"})
+            parts = str(r.get("result") or "0|0|0").split("|")
+            t, m, f = (int(float(parts[0])) if len(parts) > 0 else 0,
+                       int(float(parts[1])) if len(parts) > 1 else 0,
+                       int(float(parts[2])) if len(parts) > 2 else 0)
+            shell = (t < 500 and m == 0 and f == 0)
+            return {"text_chars": t, "media": m, "feed_markers": f,
+                    "shell": shell}
+        except Exception:
+            return {"text_chars": 0, "media": 0, "feed_markers": 0,
+                    "shell": False}
 
     def back(self):
         self._get("/back")
@@ -520,8 +551,18 @@ class WebViewEngine:
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
-    def scroll(self, target="bottom"):
+    def scroll(self, target="bottom", settle_ms=800, verify=None):
+        """Scroll like a human: after moving, let the page settle so
+        infinite-scroll content actually renders, and report the scroll
+        delta (0 delta = nothing moved / nothing new).
+
+        target: "bottom"/"top"/pixels(int)/selector (scroll into view).
+        settle_ms: ms to wait for render after the scroll.
+        verify: selector-or-text that must appear after scrolling
+            (waited for instead of the blind sleep).
+        """
         try:
+            y0 = self._scroll_y()
             if target in ("bottom", None):
                 js = "window.scrollTo(0,document.body.scrollHeight)"
             elif target == "top":
@@ -540,12 +581,31 @@ class WebViewEngine:
                     if err:
                         return {"success": False, "errors": [err]}
                     self._invalidate()
-                    return {"success": True}
+                    if settle_ms:
+                        time.sleep(min(settle_ms, 10000) / 1000.0)
+                    return {"success": True, "target": target,
+                            "delta": self._scroll_y() - y0}
             self._post("/js", {"expr": js})
             self._invalidate()
-            return {"success": True}
+            out = {"success": True, "target": target}
+            if verify:
+                r = self.wait(selector=verify)
+                out["verify"] = r.get("success", False)
+                if not r.get("success"):
+                    out["errors"] = r.get("errors")
+            elif settle_ms:
+                time.sleep(min(settle_ms, 10000) / 1000.0)
+            out["delta"] = self._scroll_y() - y0
+            return out
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
+
+    def _scroll_y(self):
+        try:
+            r = self._post("/js", {"expr": "window.scrollY"})
+            return int(float(r.get("result") or 0))
+        except Exception:
+            return 0
 
     def evaluate(self, js):
         try:
@@ -676,6 +736,22 @@ class WebViewEngine:
                     "wait_selector": wait_selector}
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
+
+    def composer_open(self, site="facebook", timeout=25):
+        """Open a social composer via warm navigation (not direct URL).
+
+        m.facebook's composer only renders its contenteditable editor when
+        reached by clicking from the feed — a direct URL load shows an
+        empty shell. This bakes in that known-good flow.
+        """
+        if site != "facebook":
+            return {"success": False,
+                    "errors": ["unknown site: %s" % site]}
+        return self.click_through(
+            "https://m.facebook.com/",
+            "Posting status baru",
+            '[contenteditable="true"]',
+            timeout=timeout)
 
     def console(self):
         """JS console messages captured by the APK's console override."""
