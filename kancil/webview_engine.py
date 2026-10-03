@@ -120,7 +120,7 @@ class WebViewEngine:
 
     # ---------- navigation ----------
 
-    def open(self, url, data=None):
+    def open(self, url, data=None, idle=False, idle_timeout=15):
         if not url.startswith(("http://", "https://", "file://")):
             url = "https://" + url
         r = self._post("/navigate", {"url": url})
@@ -129,6 +129,11 @@ class WebViewEngine:
                     "errors": [str(r)[:200]]}
         time.sleep(0.4)  # let the page start loading
         self._invalidate()
+        out = {"success": True, "url": url, "title": "", "tab": self.cur}
+        if idle:
+            w = self.wait_idle(timeout=idle_timeout)
+            out["idle"] = w.get("idle", False)
+            out["waited_ms"] = w.get("waited_ms", 0)
         st = self._get("/status")
         final = st.get("url", url) if isinstance(st, dict) else url
         tab_id = st.get("tab", self.cur) if isinstance(st, dict) else self.cur
@@ -136,9 +141,10 @@ class WebViewEngine:
         h = self._hist.setdefault(tab_id, {"history": [], "pos": -1})
         h["history"].append(final)
         h["pos"] = len(h["history"]) - 1
-        return {"success": True, "url": final,
-                "title": st.get("title", "") if isinstance(st, dict) else "",
-                "tab": tab_id}
+        out.update({"url": final,
+                    "title": st.get("title", "") if isinstance(st, dict) else "",
+                    "tab": tab_id})
+        return out
 
     def back(self):
         self._get("/back")
@@ -370,7 +376,13 @@ class WebViewEngine:
             if err:
                 return {"success": False, "errors": [err]}
             self._invalidate()
-            return {"success": True, "selector": query}
+            # Human-like: report where the click landed.
+            st = self._get("/status")
+            out = {"success": True, "selector": query}
+            if isinstance(st, dict):
+                out["url"] = st.get("url", "")
+                out["title"] = st.get("title", "")
+            return out
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
@@ -569,6 +581,57 @@ class WebViewEngine:
                         "errors": ["timeout waiting for %r" % selector]}
             return {"success": False,
                     "errors": ["need selector, ms, or text"]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def wait_idle(self, timeout=15, quiet_ms=800):
+        """Wait until the page settles like a human would: document
+        complete AND no network activity for quiet_ms. One round trip,
+        no sleep-guessing."""
+        try:
+            r = self._post("/wait/idle",
+                           {"timeout": int(timeout * 1000),
+                            "quiet_ms": quiet_ms})
+            if isinstance(r, dict) and r.get("ok"):
+                return {"success": True, "idle": r.get("idle", False),
+                        "ready_state": r.get("ready_state", "?"),
+                        "waited_ms": r.get("waited_ms", 0)}
+            return {"success": False, "errors": [str(r)[:200]]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def press(self, key="Enter", selector=None):
+        """Dispatch a real KeyboardEvent (keydown/keypress/keyup), like a
+        human hitting a key. Note: synthetic Enter does NOT submit forms
+        natively — click the submit button for that."""
+        try:
+            body = {"key": key}
+            if selector:
+                body["selector"] = selector
+            r = self._post("/press", body)
+            if isinstance(r, dict) and r.get("ok"):
+                res = r.get("result", "")
+                if res == "not-found":
+                    return {"success": False,
+                            "errors": ["element not found"]}
+                self._invalidate()
+                return {"success": True, "key": key, "result": res}
+            return {"success": False, "errors": [str(r)[:200]]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def longpress(self, selector):
+        """Mobile long-press: touchstart + contextmenu on the element."""
+        try:
+            r = self._post("/longpress", {"selector": selector})
+            if isinstance(r, dict) and r.get("ok"):
+                res = r.get("result", "")
+                if res == "not-found":
+                    return {"success": False,
+                            "errors": ["element not found: %s" % selector]}
+                self._invalidate()
+                return {"success": True, "selector": selector}
+            return {"success": False, "errors": [str(r)[:200]]}
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 

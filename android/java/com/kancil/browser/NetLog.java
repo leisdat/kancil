@@ -88,4 +88,11 @@ public class NetLog {
     public synchronized int size() {
         return entries.size();
     }
+
+    /** Millis timestamp of the most recent request, or 0 if empty.
+     *  Used by /wait/idle to detect network quiet. */
+    public synchronized long lastT0() {
+        return entries.isEmpty() ? 0
+                : entries.get(entries.size() - 1).t0;
+    }
 }

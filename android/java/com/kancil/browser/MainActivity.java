@@ -1329,7 +1329,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.8");
+                            oo.put("agent", "kancil-browser/1.9");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -1355,6 +1355,38 @@ public class MainActivity extends Activity {
                     String rep = prefs.getString("crash_report", null);
                     o.put("last_crash",
                             rep == null ? JSONObject.NULL : rep);
+                    return AgentServer.Response.json(o);
+                }
+                case "/wait/idle": {
+                    // Human-like settle: document complete + network quiet.
+                    // Runs on the agent worker thread; evalJs hops to UI.
+                    int timeoutMs = body.optInt("timeout", 15000);
+                    int quietMs = body.optInt("quiet_ms", 800);
+                    if (timeoutMs < 1000) timeoutMs = 1000;
+                    if (quietMs < 200) quietMs = 200;
+                    long start = System.currentTimeMillis();
+                    boolean idle = false;
+                    String rs = "?";
+                    while (System.currentTimeMillis() - start < timeoutMs) {
+                        try {
+                            rs = evalJs("document.readyState");
+                        } catch (Exception e) { rs = "?"; }
+                        long lastNet = active.netlog.lastT0();
+                        long quietFor = System.currentTimeMillis() - lastNet;
+                        if ("complete".equals(rs)
+                                && (lastNet == 0 || quietFor >= quietMs)) {
+                            idle = true;
+                            break;
+                        }
+                        try { Thread.sleep(250); }
+                        catch (InterruptedException ie) { break; }
+                    }
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true);
+                    o.put("idle", idle);
+                    o.put("ready_state", rs);
+                    o.put("waited_ms",
+                            System.currentTimeMillis() - start);
                     return AgentServer.Response.json(o);
                 }
                 case "/tabs": {
@@ -1637,6 +1669,72 @@ public class MainActivity extends Activity {
                     JSONObject o = new JSONObject();
                     o.put("ok", true); o.put("result", r);
                     agentNote("type " + sel);
+                    return AgentServer.Response.json(o);
+                }
+                case "/press": {
+                    // Human-like key press: dispatches real KeyboardEvents
+                    // (keydown/keypress/keyup) on the selector or the focused
+                    // element. Note: synthetic Enter does NOT trigger native
+                    // form submission — click the submit button instead.
+                    String sel = body.optString("selector", query.get("selector"));
+                    String key = body.optString("key", query.get("key"));
+                    if (key == null) key = "Enter";
+                    int code;
+                    switch (key) {
+                        case "Enter": code = 13; break;
+                        case "Escape": code = 27; break;
+                        case "Tab": code = 9; break;
+                        case "Backspace": code = 8; break;
+                        case " ": case "Space": code = 32; key = " "; break;
+                        case "ArrowUp": code = 38; break;
+                        case "ArrowDown": code = 40; break;
+                        case "ArrowLeft": code = 37; break;
+                        case "ArrowRight": code = 39; break;
+                        default: code = 0;
+                    }
+                    final int kc = code;
+                    String target = (sel != null && !sel.isEmpty())
+                            ? "document.querySelector("
+                                    + JSONObject.quote(sel) + ")"
+                            : "document.activeElement||document.body";
+                    String r = evalJs("(function(){var el=" + target + ";"
+                            + "if(!el)return 'not-found';"
+                            + "var k=" + JSONObject.quote(key) + ";"
+                            + "var init={key:k,code:k,keyCode:" + kc
+                            + ",which:" + kc + ",bubbles:true,cancelable:true};"
+                            + "el.dispatchEvent(new KeyboardEvent('keydown',init));"
+                            + "if(" + kc + ">=32)"
+                            + "el.dispatchEvent(new KeyboardEvent('keypress',init));"
+                            + "el.dispatchEvent(new KeyboardEvent('keyup',init));"
+                            + "return 'pressed:'+k})()");
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true); o.put("result", r);
+                    agentNote("press " + key);
+                    return AgentServer.Response.json(o);
+                }
+                case "/longpress": {
+                    // Mobile long-press ~= context menu. Dispatches
+                    // touchstart, a hold, then contextmenu on the element.
+                    String sel = body.optString("selector", query.get("selector"));
+                    if (sel == null)
+                        return AgentServer.Response.err(400, "missing selector");
+                    String r = evalJs("(function(){var el=document.querySelector("
+                            + JSONObject.quote(sel) + ");"
+                            + "if(!el)return 'not-found';"
+                            + "var b=el.getBoundingClientRect();"
+                            + "var t={touches:[{clientX:b.left+b.width/2,"
+                            + "clientY:b.top+b.height/2}],bubbles:true,cancelable:true};"
+                            + "el.dispatchEvent(new TouchEvent('touchstart',t));"
+                            + "el.dispatchEvent(new MouseEvent('contextmenu',"
+                            + "{bubbles:true,cancelable:true,"
+                            + "clientX:b.left+b.width/2,"
+                            + "clientY:b.top+b.height/2}));"
+                            + "el.dispatchEvent(new TouchEvent('touchend',"
+                            + "{bubbles:true,cancelable:true}));"
+                            + "return 'longpressed'})()");
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true); o.put("result", r);
+                    agentNote("longpress " + sel);
                     return AgentServer.Response.json(o);
                 }
                 case "/network": {

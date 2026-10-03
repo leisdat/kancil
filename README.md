@@ -142,6 +142,12 @@ kancil --engine webview block add ads.example   # pattern request blocking
 kancil --engine webview download https://example.com/f.zip
 kancil --engine webview upload /sdcard/pic.jpg  # next file-chooser is fed
 kancil --engine webview crashes  # last app crash report, if the APK died
+# surf like a human: open + wait for settle, press keys, long-press
+kancil --engine webview open https://example.com --idle  # readyState + network quiet
+kancil --engine webview wait-idle   # same, as a separate step
+kancil --engine webview press Enter            # real KeyboardEvent on focused element
+kancil --engine webview press Escape --selector "#modal"
+kancil --engine webview longpress ".tweet"     # mobile long-press (context menu)
 # dry-run: verify forms/composer freely, clicks+submits are blocked
 # unless you pass --confirm (anti accidental publish)
 kancil --engine webview --dry-run form fill 1 --set "isi=Halo"

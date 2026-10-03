@@ -148,6 +148,9 @@ def build_parser():
     sp.add_argument("url")
     sp.add_argument("--wait-ms", type=int, default=0,
                     help="wait N ms after load (playwright: lets JS hydrate)")
+    sp.add_argument("--idle", action="store_true",
+                    help="webview: wait for page settle (readyState + "
+                         "network quiet) like a human would")
     SP("back", help="go back")
     SP("fwd", help="go forward")
     SP("reload", help="reload page")
@@ -174,6 +177,13 @@ def build_parser():
     el.add_argument("text")
     el = SP("clear", help="clear element")
     el.add_argument("selector")
+    pr = SP("press", help="press a key like a human (Enter/Escape/Tab/arrows)")
+    pr.add_argument("key", nargs="?", default="Enter")
+    pr.add_argument("--selector", default=None,
+                    help="target element (default: focused element)")
+    lp = SP("longpress", help="mobile long-press on element (context menu)")
+    lp.add_argument("selector")
+    SP("wait-idle", help="wait for page settle: readyState + network quiet")
     el = SP("select", help="choose dropdown option")
     el.add_argument("selector")
     el.add_argument("value")
@@ -467,7 +477,7 @@ def main(argv=None):
 def dispatch(b, args):
     c = args.cmd
     if c == "open":
-        r = b.open(args.url)
+        r = b.open(args.url, idle=getattr(args, "idle", False))
         wait_ms = getattr(args, "wait_ms", 0) or 0
         if wait_ms > 0 and r.get("success"):
             import time as _t
@@ -501,6 +511,12 @@ def dispatch(b, args):
         return b.click(args.selector, confirm=args.confirm)
     if c == "type":
         return b.type(args.selector, args.text)
+    if c == "press":
+        return b.press(args.key, args.selector)
+    if c == "longpress":
+        return b.longpress(args.selector)
+    if c == "wait-idle":
+        return b.wait_idle()
     if c == "clear":
         return b.clear(args.selector)
     if c == "select":

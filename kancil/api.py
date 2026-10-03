@@ -85,8 +85,11 @@ class Kancil:
         return caps
 
     # ---------- navigation ----------
-    def open(self, url):
-        r = self.engine.open(url)
+    def open(self, url, idle=False, idle_timeout=15):
+        if self._engine_name == "webview":
+            r = self.engine.open(url, idle=idle, idle_timeout=idle_timeout)
+        else:
+            r = self.engine.open(url)
         return self._wrap(r)
 
     def back(self):
@@ -306,6 +309,25 @@ class Kancil:
 
     def wait(self, selector=None, ms=None, text=None):
         return self._wrap(self.engine.wait(selector=selector, ms=ms, text=text))
+
+    def wait_idle(self, timeout=15, quiet_ms=800):
+        if self._engine_name == "webview":
+            return self._wrap(
+                self.engine.wait_idle(timeout=timeout, quiet_ms=quiet_ms))
+        return {"success": False,
+                "errors": ["wait_idle() is webview-engine only"]}
+
+    def press(self, key="Enter", selector=None):
+        if self._engine_name == "webview":
+            return self._wrap(self.engine.press(key, selector))
+        return {"success": False,
+                "errors": ["press() is webview-engine only"]}
+
+    def longpress(self, selector):
+        if self._engine_name == "webview":
+            return self._wrap(self.engine.longpress(selector))
+        return {"success": False,
+                "errors": ["longpress() is webview-engine only"]}
 
     def console(self):
         return self._wrap(self.engine.console())

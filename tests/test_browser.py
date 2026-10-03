@@ -2336,6 +2336,14 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
         elif p == "/blocklist":
             self._json({"ok": True,
                         "patterns": len(body.get("patterns", []))})
+        elif p == "/wait/idle":
+            self._json({"ok": True, "idle": True,
+                        "ready_state": "complete", "waited_ms": 120})
+        elif p == "/press":
+            self._json({"ok": True,
+                        "result": "pressed:" + body.get("key", "Enter")})
+        elif p == "/longpress":
+            self._json({"ok": True, "result": "longpressed"})
         elif p == "/crashes":
             self._json({"ok": True, "crash_count": 0,
                         "crash_last": 0, "last_crash": None})
@@ -2402,6 +2410,27 @@ class WebViewEngineTest(unittest.TestCase):
         self.assertTrue(r["success"], r)
         self.assertEqual(r["crash_count"], 0)
         self.assertIsNone(r["last_crash"])
+
+    def test_wait_idle(self):
+        r = self.eng.wait_idle(timeout=5)
+        self.assertTrue(r["success"], r)
+        self.assertTrue(r["idle"])
+        self.assertEqual(r["ready_state"], "complete")
+
+    def test_press(self):
+        r = self.eng.press("Enter")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["key"], "Enter")
+
+    def test_longpress(self):
+        r = self.eng.longpress("#b1")
+        self.assertTrue(r["success"], r)
+
+    def test_open_idle(self):
+        r = self.eng.open("example.com", idle=True, idle_timeout=5)
+        self.assertTrue(r["success"], r)
+        self.assertTrue(r["idle"])
+        self.assertIn("waited_ms", r)
 
     def test_unreachable_fails_fast(self):
         from kancil.webview_engine import WebViewEngine
