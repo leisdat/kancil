@@ -1338,6 +1338,16 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v,
                                                    WebResourceRequest r) {
+                String url = String.valueOf(r.getUrl());
+                // Skema non-http(s) (intent://, tel:, mailto:, ...) tidak
+                // bisa dirender WebView — tanpa handling, user dapat halaman
+                // net::ERR_UNKNOWN_URL_SCHEME yang jelek (kasus: iklan
+                // intent://pyppo.com nyangkut di address bar).
+                if (!url.startsWith("http://")
+                        && !url.startsWith("https://")) {
+                    handleExternalScheme(v, url);
+                    return true; // dikonsumsi — jangan tampilkan error page
+                }
                 return false;
             }
 
@@ -1423,6 +1433,51 @@ public class MainActivity extends Activity {
                 }
             }
         };
+    }
+
+    /** Tangani skema non-http(s): blokir intent iklan diam-diam, ikuti
+     *  fallback https di dalam intent, atau lempar ke aplikasi eksternal.
+     *  Tidak pernah membiarkan WebView mencoba me-render-nya
+     *  (ERR_UNKNOWN_URL_SCHEME). Dipanggil dari
+     *  shouldOverrideUrlLoading; return-nya selalu "sudah ditangani". */
+    private void handleExternalScheme(WebView v, String url) {
+        try {
+            if (url.startsWith("intent://")) {
+                Intent intent = Intent.parseUri(url,
+                        Intent.URI_INTENT_SCHEME);
+                String data = String.valueOf(intent.getData());
+                // Intent iklan/tracker: blokir diam-diam (toast popup
+                // killer biasanya sudah muncul duluan).
+                if (adblock() && (isAd(url) || isAd(data))) {
+                    agentNote("intent iklan diblokir");
+                    return;
+                }
+                // Fallback https di dalam intent — buka di tab ini.
+                String fallback =
+                        intent.getStringExtra("browser_fallback_url");
+                if (fallback != null && (fallback.startsWith("http://")
+                        || fallback.startsWith("https://"))) {
+                    v.loadUrl(fallback);
+                    return;
+                }
+                // Serahkan ke aplikasi eksternal kalau ada yang bisa.
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (intent.resolveActivity(getPackageManager()) != null) {
+                    startActivity(intent);
+                }
+                // else: diam — tidak ada aplikasi penangan, jangan
+                // tampilkan error page.
+                return;
+            }
+            // tel:, mailto:, dsb — lempar ke Android kalau ada penangan.
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (intent.resolveActivity(getPackageManager()) != null) {
+                startActivity(intent);
+            }
+        } catch (Exception e) {
+            agentNote("skema eksternal gagal: " + e.getMessage());
+        }
     }
 
     private void showError(final String url, final String desc) {
