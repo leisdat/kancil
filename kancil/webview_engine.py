@@ -9,6 +9,7 @@ EngineError instead of pretending to work.
 """
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -21,18 +22,21 @@ from . import session as session_mod
 
 class WebViewEngine:
     name = "webview"
+    # Honest capabilities: only what the APK agent actually implements.
+    # (xpath works via document.evaluate; indexeddb/computed_style/forms/
+    #  console/HAR/fill_form are NOT implemented -> False/raises.)
     capabilities = {
         "javascript": True,
         "screenshot": True,
         "real_localstorage": True,
-        "indexeddb": True,
+        "indexeddb": False,
         "network_interception": False,
-        "computed_style": True,
+        "computed_style": False,
         "bounding_box": False,
         "console_capture": False,
         "video": True,
         "cookies": True,
-        "forms": True,
+        "forms": False,
         "downloads": False,
         "xpath": True,
         "css_selectors": True,
@@ -234,17 +238,84 @@ class WebViewEngine:
             return css
         return query
 
+    # ---------- selectors: CSS, XPath, @ref, visible text ----------
+
+    def _is_xpath(self, q):
+        q = (q or "").strip()
+        return (q.startswith("xpath=") or q.startswith("//")
+                or q.startswith("(//"))
+
+    def _xpath_expr(self, q):
+        q = q.strip()
+        return q[6:] if q.startswith("xpath=") else q
+
+    def _looks_like_text(self, q):
+        """Plain visible text (not CSS/XPath/@ref)? e.g. click "Login"."""
+        if not q or self._is_xpath(q):
+            return False
+        if engines.StaticEngine.A11Y_REF_RE.match(q):
+            return False
+        return not re.search(r'[#.\[\]>+~:()@=/"\'*|]', q)
+
+    def _target_js(self, query):
+        """JS expression evaluating to the target element (or null).
+
+        Tries, in order: CSS selector, XPath, @a11y ref (converted to CSS
+        by _sel), then visible-text match (exact, then contains).
+        """
+        q = self._sel(query)
+        if self._is_xpath(q):
+            xp = json.dumps(self._xpath_expr(q))
+            return ("(function(){var r=document.evaluate(%s,document,null,"
+                    "XPathResult.FIRST_ORDERED_NODE_TYPE,null);"
+                    "return r.singleNodeValue;})()" % xp)
+        qj = json.dumps(q)
+        if self._looks_like_text(q):
+            tq = json.dumps(q.strip())
+            return ("(function(){var el=document.querySelector(%s);"
+                    "if(el)return el;"
+                    "var x=function(xp){var r=document.evaluate(xp,document,"
+                    "null,XPathResult.FIRST_ORDERED_NODE_TYPE,null);"
+                    "return r.singleNodeValue;};"
+                    "el=x(\"//*[normalize-space(.)=\"+%s+\"]\");"
+                    "if(el)return el;"
+                    "return x(\"//*[contains(normalize-space(.),\"+%s+\")]\");"
+                    "})()" % (qj, tq, tq))
+        return "document.querySelector(%s)" % qj
+
+    def _count_js(self, query):
+        """JS expression evaluating to the number of matching elements."""
+        q = self._sel(query)
+        if self._is_xpath(q):
+            xp = json.dumps(self._xpath_expr(q))
+            return ("(function(){var r=document.evaluate(%s,document,null,"
+                    "XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,null);"
+                    "return r.snapshotLength})()" % xp), "xpath"
+        qj = json.dumps(q)
+        js = ("(function(){var n=document.querySelectorAll(%s).length;"
+              "if(n>0)return n;" % qj)
+        if self._looks_like_text(q):
+            tq = json.dumps(q.strip())
+            js += ("var x=function(xp){var r=document.evaluate(xp,document,"
+                   "null,XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,null);"
+                   "return r.snapshotLength;};"
+                   "n=x(\"//*[normalize-space(.)=\"+%s+\"]\");"
+                   "if(n>0)return n;"
+                   "return x(\"//*[contains(normalize-space(.),\"+%s+\")]\");"
+                   % (tq, tq))
+        else:
+            js += "return 0;"
+        return js + "})()", "webview"
+
     def resolve(self, query):
         try:
-            css = self._sel(query)
-            r = self._post("/js", {"expr":
-                "(function(){return document.querySelectorAll(%s).length})()"
-                % json.dumps(css)})
+            js, method = self._count_js(query)
+            r = self._post("/js", {"expr": js})
             n = int(r.get("result") or 0)
             if n == 0:
                 return {"success": False,
                         "errors": ["no element matches %r" % query]}
-            return {"success": True, "method": "webview", "count": n}
+            return {"success": True, "method": method, "count": n}
         except Exception as e:
             return {"success": False, "errors": [str(e)[:150]]}
 
@@ -252,7 +323,11 @@ class WebViewEngine:
 
     def click(self, query):
         try:
-            r = self._post("/click", {"selector": self._sel(query)})
+            r = self._post("/js", {"expr":
+                "(function(){var el=%s;"
+                "if(!el) return 'not-found';"
+                "el.scrollIntoView({block:'center'});el.click();"
+                "return 'clicked'})()" % self._target_js(query)})
             if r.get("result") == "not-found":
                 return {"success": False,
                         "errors": ["no element matches %r" % query]}
@@ -262,9 +337,26 @@ class WebViewEngine:
             return {"success": False, "errors": [str(e)[:200]]}
 
     def type(self, query, text):
+        # Native value setter (not execCommand): works with React/Vue/Angular
+        # controlled inputs because it triggers their value tracking.
         try:
-            r = self._post("/type", {"selector": self._sel(query),
-                                     "text": text or ""})
+            r = self._post("/js", {"expr":
+                "(function(){var el=%s;"
+                "if(!el) return 'not-found';"
+                "var v=%s;"
+                "el.focus();"
+                "try{"
+                "var proto=el instanceof HTMLTextAreaElement"
+                "?HTMLTextAreaElement.prototype"
+                ":(el instanceof HTMLSelectElement"
+                "?HTMLSelectElement.prototype:HTMLInputElement.prototype);"
+                "var d=Object.getOwnPropertyDescriptor(proto,'value');"
+                "if(d&&d.set)d.set.call(el,v);else el.value=v;"
+                "}catch(e){el.value=v;}"
+                "el.dispatchEvent(new Event('input',{bubbles:true}));"
+                "el.dispatchEvent(new Event('change',{bubbles:true}));"
+                "return 'typed'})()"
+                % (self._target_js(query), json.dumps(text or ""))})
             if r.get("result") == "not-found":
                 return {"success": False,
                         "errors": ["no element matches %r" % query]}
@@ -276,11 +368,17 @@ class WebViewEngine:
     def clear(self, query):
         try:
             r = self._post("/js", {"expr":
-                "(function(){var el=document.querySelector(%s);"
+                "(function(){var el=%s;"
                 "if(!el) return 'not-found';"
-                "el.focus();el.value='';"
+                "el.focus();"
+                "try{"
+                "var proto=el instanceof HTMLTextAreaElement"
+                "?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;"
+                "var d=Object.getOwnPropertyDescriptor(proto,'value');"
+                "if(d&&d.set)d.set.call(el,'');else el.value='';"
+                "}catch(e){el.value='';}"
                 "el.dispatchEvent(new Event('input',{bubbles:true}));"
-                "return 'cleared'})()" % json.dumps(self._sel(query))})
+                "return 'cleared'})()" % self._target_js(query)})
             if r.get("result") == "not-found":
                 return {"success": False,
                         "errors": ["no element matches %r" % query]}
@@ -292,14 +390,14 @@ class WebViewEngine:
     def select_option(self, query, choice):
         try:
             r = self._post("/js", {"expr":
-                "(function(){var el=document.querySelector(%s);"
+                "(function(){var el=%s;"
                 "if(!el) return 'not-found';"
                 "var v=%s, ok=false;"
                 "[...el.options].forEach(function(o){"
                 "if(o.label===v||o.text===v||o.value===v){el.value=o.value;ok=true}});"
                 "el.dispatchEvent(new Event('change',{bubbles:true}));"
                 "return ok?'selected':'no-match'})()"
-                % (json.dumps(self._sel(query)), json.dumps(choice))})
+                % (self._target_js(query), json.dumps(choice))})
             res = r.get("result")
             if res == "not-found":
                 return {"success": False,
@@ -321,11 +419,12 @@ class WebViewEngine:
     def _set_checked(self, query, val):
         try:
             r = self._post("/js", {"expr":
-                "(function(){var el=document.querySelector(%s);"
+                "(function(){var el=%s;"
                 "if(!el) return 'not-found';el.checked=%s;"
                 "el.dispatchEvent(new Event('change',{bubbles:true}));"
+                "el.dispatchEvent(new MouseEvent('click',{bubbles:true}));"
                 "return 'ok'})()"
-                % (json.dumps(self._sel(query)),
+                % (self._target_js(query),
                    "true" if val else "false")})
             if r.get("result") == "not-found":
                 return {"success": False,
@@ -336,15 +435,28 @@ class WebViewEngine:
             return {"success": False, "errors": [str(e)[:200]]}
 
     def hover(self, query):
-        # WebView has no hover; focus is the closest equivalent
-        return self.focus(query)
+        # No mouse in WebView, but mouse events trigger :hover CSS/JS.
+        try:
+            r = self._post("/js", {"expr":
+                "(function(){var el=%s;"
+                "if(!el) return 'not-found';"
+                "['mouseover','mouseenter','mousemove'].forEach(function(t){"
+                "el.dispatchEvent(new MouseEvent(t,{bubbles:true,"
+                "cancelable:true,view:window}));});"
+                "return 'hovered'})()" % self._target_js(query)})
+            if r.get("result") == "not-found":
+                return {"success": False,
+                        "errors": ["no element matches %r" % query]}
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
 
     def focus(self, query):
         try:
             r = self._post("/js", {"expr":
-                "(function(){var el=document.querySelector(%s);"
+                "(function(){var el=%s;"
                 "if(!el) return 'not-found';el.focus();return 'ok'})()"
-                % json.dumps(self._sel(query))})
+                % self._target_js(query)})
             if r.get("result") == "not-found":
                 return {"success": False,
                         "errors": ["no element matches %r" % query]}
@@ -353,11 +465,26 @@ class WebViewEngine:
             return {"success": False, "errors": [str(e)[:200]]}
 
     def scroll(self, target="bottom"):
-        js = ("window.scrollTo(0,document.body.scrollHeight)"
-              if target in ("bottom", None)
-              else "window.scrollTo(0,0)" if target == "top"
-              else "window.scrollBy(0,%d)" % int(target or 0))
         try:
+            if target in ("bottom", None):
+                js = "window.scrollTo(0,document.body.scrollHeight)"
+            elif target == "top":
+                js = "window.scrollTo(0,0)"
+            else:
+                try:
+                    js = "window.scrollBy(0,%d)" % int(target or 0)
+                except (ValueError, TypeError):
+                    # treat as selector -> scroll element into view
+                    r = self._post("/js", {"expr":
+                        "(function(){var el=%s;"
+                        "if(!el)return 'not-found';"
+                        "el.scrollIntoView({block:'center'});"
+                        "return 'ok'})()" % self._target_js(str(target))})
+                    if r.get("result") == "not-found":
+                        return {"success": False,
+                                "errors": ["no element matches %r" % target]}
+                    self._invalidate()
+                    return {"success": True}
             self._post("/js", {"expr": js})
             self._invalidate()
             return {"success": True}
@@ -376,20 +503,30 @@ class WebViewEngine:
             if ms:
                 time.sleep(min(ms, 30000) / 1000.0)
                 return {"success": True}
-            if selector:
-                css = self._sel(selector)
+            if text:
+                tj = json.dumps(text)
                 end = time.time() + self.timeout
                 while time.time() < end:
                     r = self._post("/js", {"expr":
-                        "(function(){return !!document.querySelector(%s)})()"
-                        % json.dumps(css)})
+                        "(function(){return document.body.innerText"
+                        ".includes(%s)})()" % tj})
                     if r.get("result") == "true":
+                        return {"success": True, "text": text}
+                    time.sleep(0.5)
+                return {"success": False,
+                        "errors": ["timeout waiting for text %r" % text]}
+            if selector:
+                end = time.time() + self.timeout
+                while time.time() < end:
+                    js, _m = self._count_js(selector)
+                    r = self._post("/js", {"expr": js})
+                    if int(r.get("result") or 0) > 0:
                         return {"success": True, "selector": selector}
                     time.sleep(0.5)
                 return {"success": False,
                         "errors": ["timeout waiting for %r" % selector]}
             return {"success": False,
-                    "errors": ["need selector or ms"]}
+                    "errors": ["need selector, ms, or text"]}
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
@@ -399,6 +536,13 @@ class WebViewEngine:
     # ---------- screenshot / cookies / network ----------
 
     def screenshot(self, path=None, full=False, selector=None):
+        # The agent captures the whole window (PixelCopy). Full-page and
+        # element screenshots are NOT supported: fail loudly instead of
+        # silently ignoring the flags.
+        if full or selector:
+            return {"success": False,
+                    "errors": ["full-page/element screenshot not supported "
+                               "by the webview agent (window capture only)"]}
         path = path or os.path.join(session_mod.SCREEN_DIR,
                                     "shot-%d.png" % int(time.time()))
         try:
@@ -440,6 +584,10 @@ class WebViewEngine:
         if method:
             out = [e for e in out
                    if e.get("method", "").upper() == method.upper()]
+        if type_:
+            out = [e for e in out if type_ in e.get("mime", "")]
+        if status is not None:
+            out = [e for e in out if e.get("status") == status]
         return out
 
     def network_clear(self):

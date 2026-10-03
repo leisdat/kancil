@@ -2252,9 +2252,29 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
             self._json({"ok": True, "url": body.get("url")})
         elif p == "/js":
             expr = body.get("expr", "")
-            if "querySelectorAll" in expr:
+            if "normalize-space" in expr:
+                # XPath visible-text fallback
                 self._json({"ok": True,
                             "result": "0" if "nope" in expr else "1"})
+            elif "snapshotLength" in expr or "singleNodeValue" in expr:
+                # XPath direct
+                self._json({"ok": True,
+                            "result": "0" if "nope" in expr else "1"})
+            elif "querySelectorAll" in expr:
+                if "nope" in expr or '"Login"' in expr:
+                    self._json({"ok": True, "result": "0"})
+                else:
+                    self._json({"ok": True, "result": "1"})
+            elif "innerText" in expr and "includes" in expr:
+                self._json({"ok": True, "result": "true"})
+            elif "localStorage" in expr:
+                self._json({"ok": True, "result": "{}"})
+            elif "not-found" in expr:
+                # single-element lookup; the real APK unwraps JS string
+                # quoting, so return bare values like the real /js does
+                self._json({"ok": True,
+                            "result": "not-found" if "nope" in expr
+                            else "ok"})
             else:
                 self._json({"ok": True, "result": "null"})
         elif p == "/click":
@@ -2368,3 +2388,40 @@ class WebViewEngineTest(unittest.TestCase):
         self.assertFalse(self.eng.switch_tab(99)["success"])
         self.assertTrue(self.eng.close_tab(2)["success"])
         self.assertFalse(self.eng.close_tab(1)["success"])  # last tab
+
+    def test_xpath(self):
+        r = self.eng.resolve("//button")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["method"], "xpath")
+        self.assertTrue(self.eng.click("//button[@id='b1']")["success"])
+        self.assertFalse(self.eng.resolve("//nope").get("success"))
+
+    def test_smart_text_resolve(self):
+        # plain text "Login" -> CSS misses -> XPath text fallback hits
+        self.assertTrue(self.eng.resolve("Login")["success"])
+        self.assertTrue(self.eng.click("Login")["success"])
+        self.assertFalse(self.eng.resolve("nope")["success"])
+
+    def test_wait_text(self):
+        self.assertTrue(self.eng.wait(text="hello")["success"])
+        self.assertTrue(self.eng.wait(ms=50)["success"])
+        self.assertTrue(self.eng.wait(selector="#b1")["success"])
+
+    def test_hover_scroll_selector(self):
+        self.assertTrue(self.eng.hover("#b1")["success"])
+        self.assertTrue(self.eng.scroll("#b1")["success"])
+        self.assertFalse(self.eng.scroll("#nope")["success"])
+
+    def test_screenshot_flags_honest(self):
+        self.assertFalse(self.eng.screenshot(full=True)["success"])
+        self.assertFalse(
+            self.eng.screenshot(selector="#b1")["success"])
+
+    def test_capabilities_honest(self):
+        c = self.eng.capabilities
+        self.assertTrue(c["xpath"])
+        self.assertTrue(c["css_selectors"])
+        self.assertFalse(c["indexeddb"])
+        self.assertFalse(c["computed_style"])
+        self.assertFalse(c["forms"])
+        self.assertFalse(c["console_capture"])

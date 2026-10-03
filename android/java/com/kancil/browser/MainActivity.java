@@ -762,11 +762,21 @@ public class MainActivity extends Activity {
 
     // ---------- agent server ----------
 
-    private JSONObject tabJson(Tab t) {
+    // All WebView access MUST happen on the UI thread. AgentServer handlers
+    // run on worker threads; reading t.web.getUrl() etc. directly returns
+    // null/stale (the "empty tabs" live bug).
+
+    private JSONObject tabJson(Tab t) throws Exception {
+        return uiGet(() -> tabJsonUi(t));
+    }
+
+    /** Must run on the UI thread (no latch). */
+    private JSONObject tabJsonUi(Tab t) {
         JSONObject o = new JSONObject();
         try {
+            String url = t.web.getUrl();
             o.put("id", t.id);
-            o.put("url", t.web.getUrl() == null ? "" : t.web.getUrl());
+            o.put("url", url == null ? "" : url);
             o.put("title", t.title);
             o.put("active", t == active);
         } catch (Exception ignored) {}
@@ -777,23 +787,36 @@ public class MainActivity extends Activity {
         server = new AgentServer((method, path, query, body) -> {
             switch (path) {
                 case "/status": {
-                    JSONObject o = new JSONObject();
-                    o.put("ok", true);
-                    o.put("agent", "kancil-browser/1.1");
-                    o.put("url", uiGet(() -> activeWeb().getUrl()));
-                    o.put("title", active.title);
-                    o.put("tab", active.id);
-                    o.put("tab_count", tabs.size());
-                    o.put("network_count", active.netlog.size());
+                    JSONObject o = uiGet(() -> {
+                        JSONObject oo = new JSONObject();
+                        try {
+                            String url = activeWeb().getUrl();
+                            oo.put("ok", true);
+                            oo.put("agent", "kancil-browser/1.2");
+                            oo.put("url", url == null ? "" : url);
+                            oo.put("title", active.title);
+                            oo.put("tab", active.id);
+                            oo.put("tab_count", tabs.size());
+                            oo.put("network_count", active.netlog.size());
+                        } catch (Exception ignored) {}
+                        return oo;
+                    });
                     return AgentServer.Response.json(o);
                 }
                 case "/tabs": {
-                    JSONArray a = new JSONArray();
-                    for (Tab t : new ArrayList<>(tabs)) a.put(tabJson(t));
+                    JSONArray a = uiGet(() -> {
+                        JSONArray aa = new JSONArray();
+                        try {
+                            for (Tab t : new ArrayList<>(tabs))
+                                aa.put(tabJsonUi(t));
+                        } catch (Exception ignored) {}
+                        return aa;
+                    });
+                    int activeId = uiGet(() -> active.id);
                     JSONObject o = new JSONObject();
                     o.put("ok", true);
                     o.put("tabs", a);
-                    o.put("active", active.id);
+                    o.put("active", activeId);
                     return AgentServer.Response.json(o);
                 }
                 case "/tabs/new": {

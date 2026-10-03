@@ -350,3 +350,16 @@ stable refs, scraper pagination (numbered/dedup/robots.txt), persistent
 Playwright session via `storage_state`, Agent Tool Interface
 (`kancil tool`, 59 actions, error codes), snapshot, observability.
 74 tests hijau. Rename Hermes Browser → Kancil.
+
+## Unreleased (webview fixes, dari live test)
+- APK: SEMUA akses metadata tab/WebView dipindah ke UI thread (`uiGet`) — fix bug live `tabs` kosong semua (worker thread baca `getUrl()` = null).
+- Engine: XPath beneran via `document.evaluate` (`//...`, `xpath=...`) di resolve/click/type/focus/dll.
+- Engine: smart text resolve — `click "Login"` (teks polos) fallback ke XPath text match kalau CSS nggak kena.
+- Engine: `type`/`clear` pakai native value setter (kompatibel React/Vue/Angular, bukan `execCommand`).
+- Engine: `hover` kirim mouseover/mouseenter/mousemove events (bukan cuma focus).
+- Engine: `wait(text=...)` diimplementasikan (polling `innerText`).
+- Engine: `scroll` dukung selector (scrollIntoView).
+- Engine: `screenshot(full/selector)` gagal eksplisit, bukan diam-diam diabaikan.
+- Engine: `network()` filter `type_`/`status` beneran dipakai.
+- Capabilities jujur: `indexeddb`/`computed_style`/`forms`/`console_capture` = False.
+- 13 unit tests WebView (6 baru: xpath, smart text, wait text, hover/scroll, screenshot flags, capabilities).
