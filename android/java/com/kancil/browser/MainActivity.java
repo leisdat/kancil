@@ -683,16 +683,49 @@ public class MainActivity extends Activity {
     }
 
     // ---------- dark mode (CSS filter, works on all API levels) ----------
+    // Invert + hue-rotate buat gelapin halaman; gambar/video dibalikin
+    // normal biar nggak jadi negatif. Shadow DOM (thumbnail YouTube dsb)
+    // nggak ketembus CSS dokumen utama, jadi fix-nya disuntik ke tiap
+    // shadow root + MutationObserver (debounce) buat yang dibuat belakangan.
 
     private static final String DARK_ON =
-            "(function(){if(document.getElementById('kancil-dark'))return;"
+            "(function(){"
+            + "if(document.getElementById('kancil-dark'))return;"
             + "var s=document.createElement('style');s.id='kancil-dark';"
-            + "s.textContent='html{filter:invert(1) hue-rotate(180deg);background:#111 !important}'"
-            + "+'img,video,picture,canvas,[style*=\"background-image\"]{filter:invert(1) hue-rotate(180deg)}';"
-            + "document.head.appendChild(s);})()";
+            + "s.textContent='html{filter:invert(1) hue-rotate(180deg);background:#111 !important}"
+            + "img,video,picture,canvas{filter:invert(1) hue-rotate(180deg)}';"
+            + "(document.head||document.documentElement).appendChild(s);"
+            + "var fix='img,video,picture,canvas{filter:invert(1) hue-rotate(180deg) !important}';"
+            + "function fixRoot(root,isShadow){"
+            + "if(isShadow){try{if(!root.querySelector('[data-kdf]')){"
+            + "var st=document.createElement('style');st.setAttribute('data-kdf','1');"
+            + "st.textContent=fix;root.appendChild(st);}}catch(e){}}"
+            + "var els=root.querySelectorAll?root.querySelectorAll('*'):[];"
+            + "for(var i=0;i<els.length;i++){try{if(els[i].shadowRoot)fixRoot(els[i].shadowRoot,true);}catch(e){}}}"
+            + "fixRoot(document,false);"
+            + "try{"
+            + "if(window.__kdfObs)window.__kdfObs.disconnect();"
+            + "var pend=false;"
+            + "window.__kdfObs=new MutationObserver(function(){"
+            + "if(pend)return;pend=true;"
+            + "setTimeout(function(){pend=false;try{fixRoot(document,false);}catch(e){}},800);"
+            + "});"
+            + "window.__kdfObs.observe(document.documentElement,{childList:true,subtree:true});"
+            + "}catch(e){}"
+            + "})()";
     private static final String DARK_OFF =
-            "(function(){var s=document.getElementById('kancil-dark');"
-            + "if(s)s.remove();})()";
+            "(function(){"
+            + "var s=document.getElementById('kancil-dark');if(s)s.remove();"
+            + "try{if(window.__kdfObs){window.__kdfObs.disconnect();window.__kdfObs=null;}}catch(e){}"
+            + "function clean(root){"
+            + "try{"
+            + "var f=root.querySelectorAll?root.querySelectorAll('[data-kdf]'):[];"
+            + "for(var i=0;i<f.length;i++)f[i].remove();"
+            + "var els=root.querySelectorAll?root.querySelectorAll('*'):[];"
+            + "for(var j=0;j<els.length;j++){try{if(els[j].shadowRoot)clean(els[j].shadowRoot);}catch(e){}}"
+            + "}catch(e){}}"
+            + "try{clean(document);}catch(e){}"
+            + "})()";
 
     // Agent-controlled request blocklist (pattern = URL substring).
     // Written from agent worker threads, read from WebView threads.
@@ -1492,7 +1525,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.14");
+                            oo.put("agent", "kancil-browser/1.15");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
