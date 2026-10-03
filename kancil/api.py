@@ -873,25 +873,25 @@ class Kancil:
         from .engines import UA_LIST
         return ok(user_agents=UA_LIST)
 
-    # ---------- request blocking (playwright) ----------
+    # ---------- request blocking (playwright, webview) ----------
     def block_add(self, pattern):
         fn = getattr(self.engine, "block_add", None)
         if not fn:
-            return fail("request blocking needs the playwright engine",
+            return fail("request blocking needs the playwright or webview engine",
                         supported=False)
         return self._wrap(fn(pattern))
 
     def block_list(self):
         fn = getattr(self.engine, "block_list", None)
         if not fn:
-            return fail("request blocking needs the playwright engine",
+            return fail("request blocking needs the playwright or webview engine",
                         supported=False)
         return ok(patterns=fn())
 
     def block_clear(self):
         fn = getattr(self.engine, "block_clear", None)
         if not fn:
-            return fail("request blocking needs the playwright engine",
+            return fail("request blocking needs the playwright or webview engine",
                         supported=False)
         return self._wrap(fn())
 

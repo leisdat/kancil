@@ -297,7 +297,7 @@ def build_parser():
     ua.add_argument("action", choices=["show", "set", "rotate", "list"])
     ua.add_argument("value", nargs="?")
 
-    bl = SP("block", help="request blocking (playwright engine)")
+    bl = SP("block", help="request blocking (playwright/webview engines)")
     bl.add_argument("action", choices=["add", "list", "clear"])
     bl.add_argument("pattern", nargs="?")
 

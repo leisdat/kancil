@@ -24,16 +24,18 @@ class WebViewEngine:
     name = "webview"
     # Honest capabilities: only what the APK agent actually implements.
     # (xpath works via document.evaluate; indexeddb/computed_style/forms/
-    #  console/HAR/fill_form are NOT implemented -> False/raises.)
+    #  HAR/fill_form are NOT implemented -> False/raises.
+    #  network_interception = pattern-based request *blocking* via the
+    #  agent blocklist (no response mocking like CDP Fetch).)
     capabilities = {
         "javascript": True,
         "screenshot": True,
         "real_localstorage": True,
         "indexeddb": False,
-        "network_interception": False,
+        "network_interception": True,
         "computed_style": False,
         "bounding_box": False,
-        "console_capture": False,
+        "console_capture": True,
         "video": True,
         "cookies": True,
         "forms": False,
@@ -564,22 +566,41 @@ class WebViewEngine:
             return {"success": False, "errors": [str(e)[:200]]}
 
     def console(self):
-        return {"success": True, "logs": []}
+        """JS console messages captured by the APK's console override."""
+        try:
+            r = self._get("/console")
+            logs = r.get("logs", []) if isinstance(r, dict) else []
+            if isinstance(logs, str):
+                try:
+                    logs = json.loads(logs or "[]")
+                except Exception:
+                    logs = []
+            return {"success": True,
+                    "logs": logs if isinstance(logs, list) else []}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:150]]}
+
+    def console_clear(self):
+        try:
+            self._post("/console/clear", {})
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:150]]}
 
     # ---------- screenshot / cookies / network ----------
 
     def screenshot(self, path=None, full=False, selector=None):
-        # The agent captures the whole window (PixelCopy). Full-page and
-        # element screenshots are NOT supported: fail loudly instead of
-        # silently ignoring the flags.
-        if full or selector:
+        # Element screenshots are NOT supported: fail loudly instead of
+        # silently ignoring the flag. Full-page uses the APK's native
+        # scroll-and-stitch capture.
+        if selector:
             return {"success": False,
-                    "errors": ["full-page/element screenshot not supported "
-                               "by the webview agent (window capture only)"]}
+                    "errors": ["element screenshot not supported "
+                               "by the webview agent (window/full only)"]}
         path = path or os.path.join(session_mod.SCREEN_DIR,
                                     "shot-%d.png" % int(time.time()))
         try:
-            r = self._req("GET", "/screenshot")
+            r = self._req("GET", "/screenshot/full" if full else "/screenshot")
             raw = r.get("raw", b"")
             if not raw or raw[:8] != b"\x89PNG\r\n\x1a\n":
                 return {"success": False,
@@ -587,7 +608,7 @@ class WebViewEngine:
             with open(path, "wb") as f:
                 f.write(raw)
             return {"success": True, "supported": True, "path": path,
-                    "bytes": len(raw), "full": full}
+                    "bytes": len(raw), "full": bool(full)}
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
@@ -725,7 +746,40 @@ class WebViewEngine:
         return {"engine": "webview", "agent": self.base}
 
     def block_list(self):
-        return []
+        """Agent request blocklist (URL substring patterns)."""
+        try:
+            r = self._get("/blocklist")
+            pats = r.get("patterns", []) if isinstance(r, dict) else []
+            return list(pats) if isinstance(pats, list) else []
+        except Exception:
+            return []
+
+    def block_add(self, pattern):
+        """Add URL substring patterns to the agent blocklist."""
+        try:
+            if isinstance(pattern, str):
+                pattern = [pattern]
+            cur = self.block_list()
+            for p in pattern:
+                p = (p or "").strip().lower()
+                if p and p not in cur:
+                    cur.append(p)
+            r = self._post("/blocklist", {"patterns": cur})
+            if isinstance(r, dict) and r.get("ok"):
+                return {"success": True, "patterns": cur}
+            return {"success": False,
+                    "errors": [str(r)[:200]]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def block_clear(self):
+        try:
+            r = self._post("/blocklist", {"patterns": []})
+            if isinstance(r, dict) and r.get("ok"):
+                return {"success": True}
+            return {"success": False, "errors": [str(r)[:200]]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
 
     def perf(self, url=None):
         raise EngineError("perf not supported by the webview agent v1")

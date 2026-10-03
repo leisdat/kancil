@@ -2239,6 +2239,18 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(self.PNG)))
             self.end_headers()
             self.wfile.write(self.PNG)
+        elif p == "/screenshot/full":
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(self.PNG)))
+            self.end_headers()
+            self.wfile.write(self.PNG)
+        elif p == "/console":
+            self._json({"ok": True, "logs": [
+                {"t": 123, "level": "log", "text": "hello console"},
+                {"t": 124, "level": "error", "text": "boom"}]})
+        elif p == "/blocklist":
+            self._json({"ok": True, "patterns": ["ads.example"]})
         elif p in ("/back", "/forward", "/reload"):
             self._json({"ok": True})
         else:
@@ -2292,6 +2304,11 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
             self._json({"ok": True, "result": "typed"})
         elif p == "/network/clear":
             self._json({"ok": True})
+        elif p == "/console/clear":
+            self._json({"ok": True})
+        elif p == "/blocklist":
+            self._json({"ok": True,
+                        "patterns": len(body.get("patterns", []))})
         elif p == "/tabs/new":
             t = {"id": 2, "url": body.get("url", ""),
                  "title": "New", "active": True}
@@ -2422,18 +2439,38 @@ class WebViewEngineTest(unittest.TestCase):
         self.assertFalse(self.eng.scroll("#nope")["success"])
 
     def test_screenshot_flags_honest(self):
-        self.assertFalse(self.eng.screenshot(full=True)["success"])
+        r = self.eng.screenshot(full=True)
+        self.assertTrue(r["success"], r)
+        self.assertTrue(r["full"])
         self.assertFalse(
             self.eng.screenshot(selector="#b1")["success"])
+
+    def test_console_capture(self):
+        r = self.eng.console()
+        self.assertTrue(r["success"], r)
+        self.assertEqual(len(r["logs"]), 2)
+        self.assertEqual(r["logs"][0]["level"], "log")
+        self.assertEqual(r["logs"][1]["text"], "boom")
+        self.assertTrue(self.eng.console_clear()["success"])
+
+    def test_blocklist(self):
+        pats = self.eng.block_list()
+        self.assertEqual(pats, ["ads.example"])
+        r = self.eng.block_add("tracker.example")
+        self.assertTrue(r["success"], r)
+        self.assertIn("tracker.example", r["patterns"])
+        self.assertIn("ads.example", r["patterns"])
+        self.assertTrue(self.eng.block_clear()["success"])
 
     def test_capabilities_honest(self):
         c = self.eng.capabilities
         self.assertTrue(c["xpath"])
         self.assertTrue(c["css_selectors"])
+        self.assertTrue(c["console_capture"])
+        self.assertTrue(c["network_interception"])
         self.assertFalse(c["indexeddb"])
         self.assertFalse(c["computed_style"])
         self.assertFalse(c["forms"])
-        self.assertFalse(c["console_capture"])
 
     def test_forms(self):
         forms = self.eng.forms()
