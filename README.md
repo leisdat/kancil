@@ -78,9 +78,11 @@ call; `network_curl` replays any logged request as curl.
 screenshots, PDF. Same API. Auto-detects Camoufox on Termux.
 
 **📱 WebView engine (new)** — `--engine webview` drives the
-**Kancil Browser** Android app (`android/`, ~24 KB APK) on the same phone:
+**Kancil Browser** Android app (`android/`, ~73 KB APK) on the same phone:
 real Chromium via System WebView. Log in / solve captchas once in the app,
-the Termux agent reuses that live session.
+the Termux agent reuses that live session. Includes JS console capture,
+pattern-based request blocking (`kancil block add <pattern>`), and native
+full-page screenshots — all agent-controlled, zero new dependencies.
 
 ## Quickstart
 
@@ -124,7 +126,7 @@ kancil yt-play "termux tutorial" --port 8901
 ## Tests
 
 ```
-150 unit tests (stdlib unittest) + 5 live tests (public URLs, real Chromium)
+171 unit tests (stdlib unittest) + 5 live tests (public URLs, real Chromium)
 $ python3 -m unittest tests.test_browser
 $ python3 -m unittest tests.test_live      # needs network + chromium
 ```

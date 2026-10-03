@@ -68,7 +68,7 @@ kancil/                        # project root
     devtools.py                # scraper, reader/extract, network/perf helpers
     session.py                 # persistent state (~/.kancil/)
     repl.py                    # kancil shell  (REPL interaktif)
-  tests/                       # 143 unit test + 5 live test (stdlib unittest)
+  tests/                       # 171 unit test + 5 live test (stdlib unittest)
 ```
 
 ## Dua engine, satu API
@@ -83,15 +83,15 @@ kancil/                        # project root
 | Network log + header, HAR export | ✅ | ✅ (+ interception) | ✅ (log saja) |
 | Scraper, extract, perf | ✅ | ✅ | ✅ (scraper/extract) |
 | Proxy                | ✅ | ✅ (saat start) | ❌ (ikut app) |
-| Request blocking     | ❌ | ✅ | ❌ |
+| Request blocking     | ❌ | ✅ | ✅ (blocklist pola) |
 | PDF export           | ❌ | ✅ | ❌ |
 | **JavaScript**       | ❌ jujur ditolak | ✅ | ✅ |
-| **Screenshot**       | ❌ jujur ditolak | ✅ | ✅ |
+| **Screenshot**       | ❌ jujur ditolak | ✅ | ✅ (window + full-page) |
 | **localStorage beneran / IndexedDB** | ❌ (simulasi KV) | ✅ | ✅ |
-| **Console JS / bounding box** | ❌ | ✅ | ❌ |
+| **Console JS / bounding box** | ❌ | ✅ | ✅ (console) / ❌ |
 | **Login/captcha manual** | ❌ | ⚠️ (sering ke-block) | ✅ (di app, sekali) |
 
 Engine `webview` nyambung ke aplikasi **Kancil Browser** (folder `android/`,
-APK ~29 KB) yang jalan di HP yang sama — Chromium beneran (System WebView).
+APK ~73 KB) yang jalan di HP yang sama — Chromium beneran (System WebView).
 Login/captcha cukup sekali di app, agent di Termux pakai session-nya terus:
 `kancil open --engine webview https://example.com`.
