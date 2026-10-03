@@ -156,6 +156,15 @@ def main():
     ok = r.get("success") and os.path.getsize(p2) > 1000
     check("full screenshot", ok, r)
 
+    # 11. stealth tells (needs "Mode stealth" ON in Settings)
+    v = eng.evaluate("String(navigator.webdriver)")
+    check("webdriver hidden", v.get("result") == "undefined", v)
+    v = eng.evaluate("typeof window.chrome")
+    check("window.chrome stub", v.get("result") == "object", v)
+    v = eng.evaluate("navigator.userAgent")
+    ua = v.get("result", "")
+    check("UA has no Version/4.0", "Version/4.0" not in ua, ua[:80])
+
     srv.shutdown()
     fails = [n for n, c, d in results if not c]
     print("\n%d/%d passed" % (len(results) - len(fails), len(results)))
