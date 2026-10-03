@@ -90,6 +90,7 @@ kancil/                        # project root
 | **localStorage beneran / IndexedDB** | ❌ (simulasi KV) | ✅ | ✅ |
 | **Console JS / bounding box** | ❌ | ✅ | ✅ (console) / ❌ |
 | **Login/captcha manual** | ❌ | ⚠️ (sering ke-block) | ✅ (di app, sekali) |
+| **Stealth (sembunyikan jejak WebView)** | ❌ | ⚠️ (butuh Camoufox) | ✅ (default ON) |
 
 Engine `webview` nyambung ke aplikasi **Kancil Browser** (folder `android/`,
 APK ~73 KB) yang jalan di HP yang sama — Chromium beneran (System WebView).

@@ -85,7 +85,9 @@ pattern-based request blocking (`kancil block add <pattern>`), native
 full-page + element screenshots, video listing, form fill, file upload,
 download manager — all agent-controlled, zero new dependencies. A foreground
 service ("Jaga agent tetap hidup") keeps the app alive against MIUI/EMUI
-task killers.
+task killers. **Stealth mode** (default ON) hides the small WebView tells:
+strips `Version/4.0` from the UA, locks `navigator.webdriver`, stubs
+`window.chrome` — the phone's genuine hardware does the rest.
 
 ## Quickstart
 
