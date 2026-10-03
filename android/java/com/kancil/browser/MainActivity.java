@@ -1282,7 +1282,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.6");
+                            oo.put("agent", "kancil-browser/1.7");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -1632,28 +1632,57 @@ public class MainActivity extends Activity {
 
     private byte[] screenshot() throws Exception {
         final AtomicReference<Bitmap> ref = new AtomicReference<>();
+        final AtomicReference<Throwable> errRef = new AtomicReference<>();
         final CountDownLatch latch = new CountDownLatch(1);
         ui.post(() -> {
-            View root = getWindow().getDecorView();
-            int w = root.getWidth(), h = root.getHeight();
-            if (w <= 0 || h <= 0) { latch.countDown(); return; }
-            final Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-            ref.set(bmp);
-            if (Build.VERSION.SDK_INT >= 26) {
-                PixelCopy.request(getWindow(), bmp,
-                        copyResult -> latch.countDown(),
-                        new Handler(Looper.getMainLooper()));
-            } else {
-                root.draw(new android.graphics.Canvas(bmp));
+            try {
+                View root = getWindow().getDecorView();
+                int w = root.getWidth(), h = root.getHeight();
+                if (w <= 0 || h <= 0) { latch.countDown(); return; }
+                final Bitmap bmp = Bitmap.createBitmap(w, h,
+                        Bitmap.Config.ARGB_8888);
+                if (Build.VERSION.SDK_INT >= 26) {
+                    try {
+                        ref.set(bmp);
+                        PixelCopy.request(getWindow(), bmp,
+                                copyResult -> latch.countDown(),
+                                new Handler(Looper.getMainLooper()));
+                    } catch (IllegalArgumentException noSurface) {
+                        // App backgrounded/frozen: window has no backing
+                        // surface. Fall back to drawing the WebView
+                        // directly — works without a surface.
+                        ref.set(drawWebView());
+                        latch.countDown();
+                    }
+                } else {
+                    ref.set(bmp);
+                    root.draw(new android.graphics.Canvas(bmp));
+                    latch.countDown();
+                }
+            } catch (Throwable t) {
+                errRef.set(t);
                 latch.countDown();
             }
         });
         if (!latch.await(30, TimeUnit.SECONDS)) throw new Exception("screenshot timeout");
+        if (errRef.get() != null)
+            throw new Exception("screenshot failed: "
+                    + errRef.get().getMessage());
         Bitmap bmp = ref.get();
         if (bmp == null) throw new Exception("screenshot failed");
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         bmp.compress(Bitmap.CompressFormat.PNG, 100, bos);
         return bos.toByteArray();
+    }
+
+    /** Draw the active WebView directly (no window surface needed).
+     *  Must run on the UI thread. Fallback when PixelCopy can't run. */
+    private Bitmap drawWebView() {
+        WebView wv = activeWeb();
+        int w = Math.max(1, wv.getWidth()), h = Math.max(1, wv.getHeight());
+        Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        wv.draw(new android.graphics.Canvas(b));
+        return b;
     }
 
     /** Full-page screenshot: scroll tile-by-tile, stitch natively.
