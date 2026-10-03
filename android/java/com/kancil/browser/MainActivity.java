@@ -560,6 +560,63 @@ public class MainActivity extends Activity {
         });
     }
 
+    /** Tint emerald (light) / champagne gold (dark) buat CheckBox & RadioButton. */
+    private android.content.res.ColorStateList accentTint() {
+        boolean dk = dark();
+        int checked = dk ? 0xFFD4B978 : 0xFF0E5C43;
+        int unchecked = dk ? 0xFF6B7280 : 0xFF9AA0A6;
+        return new android.content.res.ColorStateList(
+                new int[][]{
+                        new int[]{android.R.attr.state_checked},
+                        new int[]{}},
+                new int[]{checked, unchecked});
+    }
+
+    private int themeText() { return dark() ? 0xFFEDE8DC : 0xFF1F2A24; }
+    private int themeGold() { return dark() ? 0xFFD4B978 : 0xFF8A7440; }
+    private int themeAccent() { return dark() ? 0xFFD4B978 : 0xFF0E5C43; }
+
+    /** Label seksi kecil caps gold ala Emerald & Gold. */
+    private TextView sectionHeader(String t) {
+        TextView v = new TextView(this);
+        v.setText(t);
+        v.setTextSize(11);
+        v.setTypeface(null, android.graphics.Typeface.BOLD);
+        v.setTextColor(themeGold());
+        v.setLetterSpacing(0.12f);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        p.topMargin = dp(14); p.bottomMargin = dp(4);
+        v.setLayoutParams(p);
+        return v;
+    }
+
+    private View thinDivider() {
+        View v = new View(this);
+        v.setBackgroundColor(dark() ? 0xFF2A2E2A : 0xFFE8E0D0);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+        p.topMargin = dp(10); p.bottomMargin = dp(2);
+        v.setLayoutParams(p);
+        return v;
+    }
+
+    private CheckBox themedCheckBox(String label, boolean checked) {
+        CheckBox cb = new CheckBox(this);
+        cb.setText(label);
+        cb.setChecked(checked);
+        cb.setButtonTintList(accentTint());
+        cb.setTextColor(themeText());
+        cb.setTextSize(14);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        p.topMargin = dp(4); p.bottomMargin = dp(4);
+        cb.setLayoutParams(p);
+        return cb;
+    }
+
     private void showSettings() {
         String cur = engineKey();
         LinearLayout root = new LinearLayout(this);
@@ -567,10 +624,19 @@ public class MainActivity extends Activity {
         int pad = (int) (16 * getResources().getDisplayMetrics().density);
         root.setPadding(pad, pad / 2, pad, pad / 2);
 
-        TextView engLabel = new TextView(this);
-        engLabel.setText("Search engine");
-        engLabel.setTextSize(13);
-        root.addView(engLabel);
+        TextView title = new TextView(this);
+        title.setText("Pengaturan");
+        title.setTextSize(20);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setTextColor(themeAccent());
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        tp.bottomMargin = dp(4);
+        title.setLayoutParams(tp);
+        root.addView(title);
+
+        root.addView(sectionHeader("MESIN PENCARI"));
 
         RadioGroup rg = new RadioGroup(this);
         int checkedId = 0;
@@ -578,30 +644,24 @@ public class MainActivity extends Activity {
             RadioButton rb = new RadioButton(this);
             rb.setText(ENGINES[i][1]);
             rb.setId(1000 + i);
+            rb.setButtonTintList(accentTint());
+            rb.setTextColor(themeText());
+            rb.setTextSize(14);
             if (ENGINES[i][0].equals(cur)) checkedId = rb.getId();
             rg.addView(rb);
         }
         rg.check(checkedId);
         root.addView(rg);
 
-        final CheckBox cbAd = new CheckBox(this);
-        cbAd.setText("Adblock (blokir iklan & tracker)");
-        cbAd.setChecked(adblock());
-        final CheckBox cbData = new CheckBox(this);
-        cbData.setText("Hemat data (tanpa gambar)");
-        cbData.setChecked(dataSaver());
-        final CheckBox cbDesk = new CheckBox(this);
-        cbDesk.setText("Situs desktop");
-        cbDesk.setChecked(desktop());
-        final CheckBox cbDark = new CheckBox(this);
-        cbDark.setText("Mode malam");
-        cbDark.setChecked(dark());
-        final CheckBox cbKeep = new CheckBox(this);
-        cbKeep.setText("Jaga agent tetap hidup (anti-freeze MIUI)");
-        cbKeep.setChecked(keepAlive());
-        final CheckBox cbStealth = new CheckBox(this);
-        cbStealth.setText("Mode stealth (sembunyikan jejak WebView)");
-        cbStealth.setChecked(stealth());
+        root.addView(thinDivider());
+        root.addView(sectionHeader("FITUR"));
+
+        final CheckBox cbAd = themedCheckBox("Adblock (blokir iklan & tracker)", adblock());
+        final CheckBox cbData = themedCheckBox("Hemat data (tanpa gambar)", dataSaver());
+        final CheckBox cbDesk = themedCheckBox("Situs desktop", desktop());
+        final CheckBox cbDark = themedCheckBox("Mode malam", dark());
+        final CheckBox cbKeep = themedCheckBox("Jaga agent tetap hidup (anti-freeze MIUI)", keepAlive());
+        final CheckBox cbStealth = themedCheckBox("Mode stealth (sembunyikan jejak WebView)", stealth());
         root.addView(cbAd);
         root.addView(cbData);
         root.addView(cbDesk);
@@ -617,8 +677,7 @@ public class MainActivity extends Activity {
             if (ENGINES[i][0].equals(cur)) selEng[0] = i;
         rg.setOnCheckedChangeListener((g, id) -> selEng[0] = id - 1000);
 
-        roundDialog(new AlertDialog.Builder(this)
-                .setTitle("Pengaturan")
+        AlertDialog dlg = new AlertDialog.Builder(this)
                 .setView(sv)
                 .setPositiveButton("OK", (d, which) -> {
                     boolean darkChanged = cbDark.isChecked() != dark();
@@ -647,7 +706,13 @@ public class MainActivity extends Activity {
                             Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("Batal", null)
-                .show());
+                .show();
+        // Tombol dialog ikut tema (default-nya teal polos).
+        try {
+            dlg.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(themeAccent());
+            dlg.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(themeGold());
+        } catch (Exception ignored) {}
+        roundDialog(dlg);
     }
 
     // ---------- reader mode ----------
@@ -926,6 +991,7 @@ public class MainActivity extends Activity {
         pm.getMenu().add("Cari di halaman");
         pm.getMenu().add("Download");
         pm.getMenu().add("Agent API");
+        pm.getMenu().add("DevTools");
         pm.getMenu().add("Pengaturan");
         pm.setOnMenuItemClickListener(item -> {
             String t = String.valueOf(item.getTitle());
@@ -954,6 +1020,9 @@ public class MainActivity extends Activity {
                 case "Agent API":
                     showAgentDialog();
                     break;
+                case "DevTools":
+                    showDevTools();
+                    break;
                 case "Pengaturan":
                     showSettings();
                     break;
@@ -961,6 +1030,130 @@ public class MainActivity extends Activity {
             return true;
         });
         pm.show();
+    }
+
+    /** DevTools manual: console JS, eksekutor JavaScript, dan network log
+     *  tab aktif. Tanpa perlu agent. */
+    private void showDevTools() {
+        final Tab tab = active;
+        if (tab == null) return;
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(12);
+        root.setPadding(pad, pad, pad, pad);
+
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        Button bCon = new Button(this); bCon.setText("Console");
+        Button bJs = new Button(this); bJs.setText("JavaScript");
+        Button bNet = new Button(this); bNet.setText("Network");
+        LinearLayout.LayoutParams wp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        bar.addView(bCon, wp); bar.addView(bJs, wp); bar.addView(bNet, wp);
+        root.addView(bar);
+
+        final ScrollView sv = new ScrollView(this);
+        final TextView out = new TextView(this);
+        out.setTypeface(android.graphics.Typeface.MONOSPACE);
+        out.setTextSize(11);
+        out.setTextIsSelectable(true);
+        sv.addView(out);
+        LinearLayout.LayoutParams svp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(320));
+        svp.topMargin = dp(8);
+        root.addView(sv, svp);
+
+        // Bar eksekusi JS (cuma tampil di mode JavaScript)
+        final LinearLayout jsBar = new LinearLayout(this);
+        jsBar.setOrientation(LinearLayout.HORIZONTAL);
+        jsBar.setVisibility(View.GONE);
+        final EditText jsIn = new EditText(this);
+        jsIn.setHint("document.title");
+        jsIn.setSingleLine(true);
+        Button jsRun = new Button(this);
+        jsRun.setText("▶");
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        jsBar.addView(jsIn, ip);
+        jsBar.addView(jsRun);
+        LinearLayout.LayoutParams jbp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        jbp.topMargin = dp(8);
+        root.addView(jsBar, jbp);
+
+        final String[] mode = {"con"};
+        Runnable render = new Runnable() {
+            @Override public void run() {
+                StringBuilder sb = new StringBuilder();
+                if (mode[0].equals("con")) {
+                    jsBar.setVisibility(View.GONE);
+                    java.util.List<JSONObject> buf;
+                    synchronized (tab.consoleBuf) {
+                        buf = new java.util.ArrayList<>(tab.consoleBuf);
+                    }
+                    if (buf.isEmpty()) sb.append("(console kosong)");
+                    for (JSONObject o : buf) {
+                        sb.append('[').append(o.optString("level", "?")).append("] ")
+                          .append(o.optString("text", "")).append('\n');
+                        String src = o.optString("source", "");
+                        if (!src.isEmpty())
+                            sb.append("    @ ").append(src).append(':')
+                              .append(o.optInt("line", 0)).append('\n');
+                    }
+                } else if (mode[0].equals("js")) {
+                    jsBar.setVisibility(View.VISIBLE);
+                    sb.append("// ketik JS di bawah, tap ▶\n// contoh: document.title");
+                    if (out.getTag() != null) {
+                        sb.append("\n\n── hasil ──\n").append(out.getTag());
+                        out.setTag(null);
+                    }
+                } else {
+                    jsBar.setVisibility(View.GONE);
+                    try {
+                        JSONArray arr = tab.netlog.toJson();
+                        if (arr.length() == 0) sb.append("(network kosong)");
+                        for (int i = Math.max(0, arr.length() - 80); i < arr.length(); i++) {
+                            JSONObject e = arr.getJSONObject(i);
+                            sb.append(e.optString("method", "?")).append(' ')
+                              .append(e.isNull("status") ? "-" : e.optInt("status"))
+                              .append(' ').append(e.optString("url", "")).append('\n');
+                            if (!e.isNull("error"))
+                                sb.append("    ! ").append(e.optString("error")).append('\n');
+                        }
+                    } catch (Exception e) {
+                        sb.append("gagal baca netlog: ").append(e.getMessage());
+                    }
+                }
+                out.setText(sb.toString());
+                sv.post(() -> sv.fullScroll(View.FOCUS_DOWN));
+            }
+        };
+
+        bCon.setOnClickListener(v -> { mode[0] = "con"; render.run(); });
+        bJs.setOnClickListener(v -> { mode[0] = "js"; render.run(); });
+        bNet.setOnClickListener(v -> { mode[0] = "net"; render.run(); });
+        jsRun.setOnClickListener(v -> {
+            String code = jsIn.getText().toString();
+            if (code.trim().isEmpty()) return;
+            try {
+                tab.web.evaluateJavascript(code, value -> {
+                    out.setTag("› " + code + "\n‹ " + value);
+                    render.run();
+                });
+            } catch (Exception e) {
+                out.setTag("error: " + e.getMessage());
+                render.run();
+            }
+        });
+
+        render.run();
+        roundDialog(new AlertDialog.Builder(this)
+                .setTitle("DevTools — " + tab.web.getUrl())
+                .setView(root)
+                .setPositiveButton("Tutup", null)
+                .show());
     }
 
     private void showAgentDialog() {
@@ -1525,7 +1718,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.15");
+                            oo.put("agent", "kancil-browser/1.16");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
