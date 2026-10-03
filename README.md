@@ -162,6 +162,7 @@ kancil --engine webview press Enter --no-submit-fallback  # tanpa auto-submit
 kancil --engine webview composer-open  # m.facebook composer via warm nav
 kancil --engine webview har export yt.har  # HAR dari netlog APK (auto-sync)
 kancil --engine webview downloads  # dl_status + bytes_done/bytes_total per file
+kancil doctor  # health check: engines, agent server, session, env
 # dry-run: verify forms/composer freely, clicks+submits are blocked
 # unless you pass --confirm (anti accidental publish)
 kancil --engine webview --dry-run form fill 1 --set "isi=Halo"

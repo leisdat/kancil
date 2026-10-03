@@ -2817,3 +2817,49 @@ class WebViewEngineTest(unittest.TestCase):
 
     def test_storage_get_missing(self):
         self.assertIsNone(self.eng.storage_get("nope", "local"))
+
+
+class DoctorTest(unittest.TestCase):
+    def test_run_shape(self):
+        from kancil import doctor
+        checks, all_ok = doctor.run()
+        self.assertIsInstance(checks, list)
+        self.assertTrue(len(checks) >= 6)
+        names = [c["name"] for c in checks]
+        for n in ("python", "dns", "static engine", "playwright engine",
+                  "webview engine", "disk", "environment"):
+            self.assertIn(n, names, names)
+        for c in checks:
+            self.assertIn(c["status"], ("ok", "warn", "fail"))
+            self.assertIn("detail", c)
+            self.assertIn("hint", c)
+        self.assertIsInstance(all_ok, bool)
+
+    def test_format_text(self):
+        from kancil import doctor
+        checks, _ = doctor.run()
+        txt = doctor.format_text(checks)
+        self.assertIn("python", txt)
+        self.assertTrue(any(s in txt for s in ("✓", "!", "✗")))
+
+    def test_api_doctor(self):
+        from kancil.api import Kancil
+        k = Kancil(engine="static")
+        try:
+            r = k.doctor()
+        finally:
+            k.close()
+        self.assertTrue(r["success"])
+        self.assertIn("checks", r)
+        self.assertIn("summary", r)
+        self.assertIsInstance(r["healthy"], bool)
+
+    def test_cli_doctor(self):
+        import subprocess
+        r = subprocess.run(
+            [sys.executable, "-m", "kancil", "doctor", "--local"],
+            capture_output=True, text=True, cwd="/home/hatch/workspace/kancil",
+            timeout=60)
+        # exit 0 only when everything healthy; here playwright/webview fail
+        self.assertIn("python", r.stdout)
+        self.assertIn("static engine", r.stdout)

@@ -363,6 +363,14 @@ class Kancil:
         errs = self.engine.errors
         return ok(errors=list(errs() if callable(errs) else errs)[-50:])
 
+    def doctor(self):
+        """One-command health check: python, dns, static, playwright,
+        webview server+session, disk, env. Engine-independent."""
+        from kancil import doctor as _doctor
+        checks, all_ok = _doctor.run()
+        return ok(checks=checks, healthy=all_ok,
+                  summary=_doctor.format_text(checks))
+
     # ---------- screenshot ----------
     def screenshot(self, path=None, full=False, selector=None):
         path = path or os.path.join(session_mod.SCREEN_DIR,

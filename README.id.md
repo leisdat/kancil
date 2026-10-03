@@ -144,6 +144,10 @@ Login/captcha cukup sekali di app, agent di Termux pakai session-nya terus:
 > Tema **Emerald & Gold**: light mode toolbar putih gading + ikon emerald tua,
 > dark mode noir + emas champagne, progress bar emas, kartu tab ber-ring emas,
 > semua dialog rounded.
+>
+> `kancil doctor` — cek kesehatan sekali jalan: engine static/playwright/webview,
+> server agent, sesi login, disk, environment. Kalau ada yang rusak, dikasih tau
+> cara benerinnya.
 
 ## Troubleshooting (engine webview)
 

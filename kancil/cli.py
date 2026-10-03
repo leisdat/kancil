@@ -57,6 +57,8 @@ def put_browser(b, st, args):
 
 
 def emit(result, args):
+    if result.get("_printed"):
+        return
     if args.json:
         print(json.dumps(result, indent=1, ensure_ascii=False, default=str))
     elif args.raw:
@@ -222,6 +224,7 @@ def build_parser():
     cr = SP("crashes", help="last app crash report (webview engine)")
     cr.add_argument("--clear", action="store_true")
     SP("errors", help="error console")
+    SP("doctor", help="health check: engines, server, env")
 
     sh = SP("screenshot", help="take screenshot (playwright engine)")
     sh.add_argument("--full", action="store_true")
@@ -568,6 +571,12 @@ def dispatch(b, args):
         return b.crashes(clear=args.clear)
     if c == "errors":
         return b.errors()
+    if c == "doctor":
+        r = b.doctor()
+        if getattr(args, "json", False) or getattr(args, "raw", False):
+            return r
+        print(r.get("summary", ""))
+        return {"success": r.get("healthy", False), "_printed": True}
     if c == "screenshot":
         return b.screenshot(path=args.out, full=args.full, selector=args.element)
     if c == "network":
