@@ -77,6 +77,8 @@ public class MainActivity extends Activity {
                 java.util.Collections.synchronizedList(new java.util.ArrayList<>());
         String title = "";
         String defaultUA = "";
+        /** True if this tab was spawned by window.open / target=_blank. */
+        boolean popup = false;
         Tab(int id, WebView web) { this.id = id; this.web = web; }
 
         void consoleAdd(String level, String text, String source, int line) {
@@ -1135,6 +1137,15 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageStarted(WebView v, String url, Bitmap favicon) {
+                // Tab popup yang navigasi ke URL iklan: tutup langsung,
+                // jangan jadi sampah tab.
+                if (tab.popup && adblock() && isAd(url)) {
+                    tab.netlog.add("GET", url, null);
+                    final int pid = tab.id;
+                    ui.post(() -> closeTabUi(pid));
+                    agentNote("popup iklan diblokir");
+                    return;
+                }
                 // Stealth first: patch the JS tells before page scripts run
                 // (best effort — the context may still be warming up).
                 if (stealth()) v.evaluateJavascript(STEALTH_JS, null);
@@ -1270,14 +1281,23 @@ public class MainActivity extends Activity {
                 return true;
             }
 
-            // Popup (window.open / target=_blank) -> new tab.
+            // Popup (window.open / target=_blank).
             // Runs on the UI thread already: create the tab synchronously.
+            // Anti-iklan: popup TANPA user gesture (auto-popup) langsung
+            // diblokir — 99% iklan. Popup DENGAN gesture tetap dibuka tapi
+            // ditandai; kalau URL tujuannya kena pola adblock, tab-nya
+            // langsung ditutup di onPageStarted.
             @Override
             public boolean onCreateWindow(WebView view, boolean isDialog,
                                           boolean isUserGesture,
                                           Message resultMsg) {
                 try {
+                    if (!isUserGesture) {
+                        agentNote("popup diblokir");
+                        return false;
+                    }
                     Tab t = newTabUi(null, true);
+                    t.popup = true;
                     WebView.WebViewTransport transport =
                             (WebView.WebViewTransport) resultMsg.obj;
                     transport.setWebView(t.web);
@@ -1452,7 +1472,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.12");
+                            oo.put("agent", "kancil-browser/1.13");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
