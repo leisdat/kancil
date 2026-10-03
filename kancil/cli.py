@@ -181,6 +181,8 @@ def build_parser():
     pr.add_argument("key", nargs="?", default="Enter")
     pr.add_argument("--selector", default=None,
                     help="target element (default: focused element)")
+    pr.add_argument("--no-submit-fallback", action="store_true",
+                    help="don't auto-submit the form when Enter does nothing")
     lp = SP("longpress", help="mobile long-press on element (context menu)")
     lp.add_argument("selector")
     ct = SP("click-through",
@@ -527,7 +529,8 @@ def dispatch(b, args):
     if c == "type":
         return b.type(args.selector, args.text)
     if c == "press":
-        return b.press(args.key, args.selector)
+        return b.press(args.key, args.selector,
+                       submit_fallback=not args.no_submit_fallback)
     if c == "longpress":
         return b.longpress(args.selector)
     if c == "click-through":

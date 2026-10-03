@@ -154,7 +154,9 @@ kancil --engine webview press Escape --selector "#modal"
 kancil --engine webview longpress ".tweet"     # mobile long-press (context menu)
 kancil --engine webview scroll 600 --settle-ms 1200  # scroll + wait render
 kancil --engine webview scroll 600 --verify ".new-post"  # wait for content
+kancil --engine webview press Enter  # synthetic Enter; auto-submit form kalau key nggak ngapa-ngapain
 kancil --engine webview composer-open  # m.facebook composer via warm nav
+kancil --engine webview har export yt.har  # HAR dari netlog APK (auto-sync)
 # dry-run: verify forms/composer freely, clicks+submits are blocked
 # unless you pass --confirm (anti accidental publish)
 kancil --engine webview --dry-run form fill 1 --set "isi=Halo"

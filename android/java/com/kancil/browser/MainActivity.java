@@ -1407,7 +1407,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.11");
+                            oo.put("agent", "kancil-browser/1.12");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -1718,8 +1718,50 @@ public class MainActivity extends Activity {
                 }
                 case "/downloads": {
                     JSONArray arr = new JSONArray();
+                    DownloadManager dm = (DownloadManager)
+                            getSystemService(DOWNLOAD_SERVICE);
                     synchronized (downloadList) {
-                        for (JSONObject e : downloadList) arr.put(e);
+                        for (JSONObject e : downloadList) {
+                            JSONObject c;
+                            try { c = new JSONObject(e.toString()); }
+                            catch (Exception ignored) { c = e; }
+                            long id = e.optLong("id", -1);
+                            if (id >= 0 && dm != null) {
+                                // Live progress from DownloadManager.
+                                android.database.Cursor cur = null;
+                                try {
+                                    cur = dm.query(new DownloadManager.Query()
+                                            .setFilterById(id));
+                                    if (cur != null && cur.moveToFirst()) {
+                                        int st = cur.getInt(cur.getColumnIndex(
+                                            DownloadManager.COLUMN_STATUS));
+                                        long done = cur.getLong(cur.getColumnIndex(
+                                            DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
+                                        long total = cur.getLong(cur.getColumnIndex(
+                                            DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+                                        String s;
+                                        switch (st) {
+                                            case DownloadManager.STATUS_SUCCESSFUL:
+                                                s = "done"; break;
+                                            case DownloadManager.STATUS_FAILED:
+                                                s = "failed"; break;
+                                            case DownloadManager.STATUS_RUNNING:
+                                                s = "running"; break;
+                                            case DownloadManager.STATUS_PAUSED:
+                                                s = "paused"; break;
+                                            default: s = "pending";
+                                        }
+                                        c.put("dl_status", s);
+                                        c.put("bytes_done", done);
+                                        c.put("bytes_total", total);
+                                    }
+                                } catch (Exception ignored) {
+                                } finally {
+                                    if (cur != null) cur.close();
+                                }
+                            }
+                            arr.put(c);
+                        }
                     }
                     JSONObject o = new JSONObject();
                     o.put("ok", true); o.put("downloads", arr);

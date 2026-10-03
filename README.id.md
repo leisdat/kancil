@@ -131,6 +131,12 @@ Login/captcha cukup sekali di app, agent di Termux pakai session-nya terus:
 > (delta 0 = nggak ada konten baru). `open --idle` deteksi "shell kosong"
 > (title render tapi konten nol) → kasih warning login gate.
 >
+> Polish: `press Enter` otomatis submit form beneran kalau synthetic key-nya
+> nggak ngapa-ngapain (cek: nggak ada navigasi + request baru); `har export`
+> narik netlog dari APK dulu biar nggak kosong; `open()` re-sync tab ID kalau
+> app sempat di-restart Android; `/downloads` lapor progress
+> (dl_status/bytes_done/bytes_total).
+>
 > Kalau app crash saat di-drive agent, UncaughtExceptionHandler restart
 > otomatis (max 3x per 5 menit, anti loop) dan stacktrace bisa dibaca via
 > `kancil --engine webview crashes`.

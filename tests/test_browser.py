@@ -2302,6 +2302,9 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
                     self._json({"ok": True, "result": "1"})
             elif "innerText" in expr and "includes" in expr:
                 self._json({"ok": True, "result": "true"})
+            elif "requestSubmit" in expr:
+                # press(Enter) form-submit fallback
+                self._json({"ok": True, "result": "clicked-submit"})
             elif "window.scrollY" in expr:
                 self._json({"ok": True, "result": "600"})
             elif "innerText.length" in expr:
@@ -2525,6 +2528,62 @@ class WebViewEngineTest(unittest.TestCase):
     def test_composer_open_unknown_site(self):
         r = self.eng.composer_open(site="twitter")
         self.assertFalse(r["success"])
+
+    def test_press_enter_fallback_submits(self):
+        # mock: /press ok, /network count unchanged, /status url unchanged
+        r = self.eng.press("Enter")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r.get("submitted"), "clicked-submit")
+
+    def test_press_enter_no_fallback_flag(self):
+        r = self.eng.press("Enter", submit_fallback=False)
+        self.assertTrue(r["success"], r)
+        self.assertNotIn("submitted", r)
+
+    def test_press_escape_no_fallback(self):
+        r = self.eng.press("Escape")
+        self.assertTrue(r["success"], r)
+        self.assertNotIn("submitted", r)
+
+    def test_sync_tab_recovered(self):
+        self.eng.cur = 0  # stale; mock /status says tab 1
+        r = self.eng.sync_tab()
+        self.assertTrue(r["success"], r)
+        self.assertTrue(r["recovered"], r)
+        self.assertEqual(self.eng.cur, 1)
+
+    def test_sync_tab_no_change(self):
+        self.eng.cur = 1  # matches mock /status
+        r = self.eng.sync_tab()
+        self.assertTrue(r["success"], r)
+        self.assertFalse(r["recovered"], r)
+
+    def test_open_syncs_tab(self):
+        self.eng.cur = 0
+        r = self.eng.open("example.com")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(self.eng.cur, 1)  # adopted from /status
+
+    def test_har_export_webview(self):
+        import tempfile, json, os
+        from kancil.api import Kancil
+        b = Kancil.__new__(Kancil)
+        b._engine_name = "webview"
+        b.engine = self.eng
+        b._har_recording = False
+        p = tempfile.mktemp(suffix=".har")
+        try:
+            r = b.har_export(p)
+            self.assertTrue(r.get("success"), r)
+            with open(p) as f:
+                har = json.load(f)
+            entries = har["log"]["entries"]
+            self.assertGreaterEqual(len(entries), 1)
+            self.assertEqual(entries[0]["request"]["url"],
+                             "https://example.com/")
+        finally:
+            if os.path.exists(p):
+                os.unlink(p)
 
     def test_screenshot_retries_on_bad_png(self):        # first response is garbage, second is a PNG -> success via retry
         calls = {"n": 0}

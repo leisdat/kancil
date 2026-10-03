@@ -120,9 +120,29 @@ class WebViewEngine:
 
     # ---------- navigation ----------
 
+    def sync_tab(self):
+        """Reconcile engine tab id with the app's active tab.
+
+        Android can kill/recreate the app in the background; tab ids are
+        persisted, but the user may also close tabs by hand. If our idea
+        of the current tab no longer matches the app, adopt the app's.
+        """
+        try:
+            st = self._get("/status")
+            real = st.get("tab") if isinstance(st, dict) else None
+            if real is not None and int(real) != self.cur:
+                old = self.cur
+                self.cur = int(real)
+                return {"success": True, "recovered": True,
+                        "was": old, "tab": self.cur}
+            return {"success": True, "recovered": False, "tab": self.cur}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
     def open(self, url, data=None, idle=False, idle_timeout=15):
         if not url.startswith(("http://", "https://", "file://")):
             url = "https://" + url
+        self.sync_tab()  # cheap; keeps cur honest after app restarts
         r = self._post("/navigate", {"url": url})
         if not self._ok(r):
             return {"success": False, "url": url,
@@ -666,11 +686,21 @@ class WebViewEngine:
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
-    def press(self, key="Enter", selector=None):
+    def press(self, key="Enter", selector=None, submit_fallback=True):
         """Dispatch a real KeyboardEvent (keydown/keypress/keyup), like a
-        human hitting a key. Note: synthetic Enter does NOT submit forms
-        natively — click the submit button for that."""
+        human hitting a key.
+
+        submit_fallback: synthetic Enter does NOT trigger native form
+        submission. When Enter visibly does nothing (no navigation, no new
+        network requests), fall back to a real submit of the enclosing
+        form — clicking its submit button first (runs validation), else
+        requestSubmit()/submit(). Reported as ``submitted`` in the result.
+        """
         try:
+            n0 = url0 = None
+            if key == "Enter" and submit_fallback:
+                n0 = len(self._netlog_snapshot())
+                url0 = self._cur_url()
             body = {"key": key}
             if selector:
                 body["selector"] = selector
@@ -681,10 +711,49 @@ class WebViewEngine:
                     return {"success": False,
                             "errors": ["element not found"]}
                 self._invalidate()
-                return {"success": True, "key": key, "result": res}
+                out = {"success": True, "key": key, "result": res}
+                if n0 is not None:
+                    out["submitted"] = self._enter_fallback(n0, url0)
+                return out
             return {"success": False, "errors": [str(r)[:200]]}
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
+
+    def _netlog_snapshot(self):
+        try:
+            r = self._get("/network")
+            reqs = r.get("requests", []) if isinstance(r, dict) else []
+            return reqs
+        except Exception:
+            return []
+
+    def _enter_fallback(self, n0, url0):
+        """True submit after a synthetic Enter that did nothing observable."""
+        time.sleep(0.6)
+        try:
+            n1 = len(self._netlog_snapshot())
+            url1 = self._cur_url()
+        except Exception:
+            return False
+        if n1 != n0 or url1 != url0:
+            return False  # the key already did something; don't double-fire
+        try:
+            r = self._post("/js", {"expr":
+                "(function(){var el=document.activeElement;"
+                "var f=el&&el.form?el.form:"
+                "(el&&el.closest?el.closest('form'):null);"
+                "if(!f&&document.forms.length===1)f=document.forms[0];"
+                "if(!f)return 'no-form';"
+                "var b=f.querySelector("
+                "'button[type=submit],input[type=submit]');"
+                "if(b){b.click();return 'clicked-submit';}"
+                "if(f.requestSubmit){f.requestSubmit();"
+                "return 'requestSubmit';}"
+                "f.submit();return 'submitted';})()"})
+            res = r.get("result") if isinstance(r, dict) else ""
+            return res if res and res != "no-form" else False
+        except Exception:
+            return False
 
     def longpress(self, selector):
         """Mobile long-press: touchstart + contextmenu on the element."""

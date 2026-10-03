@@ -321,9 +321,10 @@ class Kancil:
         return {"success": False,
                 "errors": ["wait_idle() is webview-engine only"]}
 
-    def press(self, key="Enter", selector=None):
+    def press(self, key="Enter", selector=None, submit_fallback=True):
         if self._engine_name == "webview":
-            return self._wrap(self.engine.press(key, selector))
+            return self._wrap(self.engine.press(
+                key, selector, submit_fallback=submit_fallback))
         return {"success": False,
                 "errors": ["press() is webview-engine only"]}
 
@@ -968,6 +969,15 @@ class Kancil:
     # ---------- HAR ----------
     # Recording reuses the network log; har start = clear + mark, export
     # serializes to valid HAR 1.2 with safe-by-default redaction.
+    def _sync_netlog(self):
+        # WebView keeps its log in the APK; pull it before serializing so
+        # `har export` never writes an empty file after a live session.
+        # Static/playwright engines keep theirs in-process (no-op refresh).
+        try:
+            self.engine.network()
+        except Exception:
+            pass
+
     def har_start(self):
         self.engine.network_clear()
         self._har_recording = True
@@ -976,6 +986,7 @@ class Kancil:
 
     def har_stop(self):
         self._har_recording = False
+        self._sync_netlog()
         return ok(recording=False, entries=len(self.engine.netlog))
 
     def har_clear(self):
@@ -984,6 +995,7 @@ class Kancil:
         return ok(cleared=True)
 
     def har_stats(self):
+        self._sync_netlog()
         n = len(self.engine.netlog)
         failed = sum(1 for e in self.engine.netlog
                      if isinstance(e.get("status"), int) and e["status"] >= 400)
@@ -1023,6 +1035,7 @@ class Kancil:
         import urllib.parse as up
         if not redact:
             redact_cookie = redact_authorization = redact_token = False
+        self._sync_netlog()
         entries = []
         for e in self.engine.netlog:
             started = e.get("started") or ("%sT%s" % (
