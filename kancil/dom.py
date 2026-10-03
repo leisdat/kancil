@@ -291,35 +291,6 @@ def match_simple(node, s):
     return True
 
 
-def _split_selector_group(group):
-    """Split on whitespace, but not inside [...] or quotes."""
-    parts, buf = [], ""
-    depth, quote = 0, None
-    for ch in group.strip():
-        if quote:
-            buf += ch
-            if ch == quote:
-                quote = None
-        elif ch in ("'", '"'):
-            quote = ch
-            buf += ch
-        elif ch == "[":
-            depth += 1
-            buf += ch
-        elif ch == "]":
-            depth = max(0, depth - 1)
-            buf += ch
-        elif ch.isspace() and depth == 0:
-            if buf:
-                parts.append(buf)
-                buf = ""
-        else:
-            buf += ch
-    if buf:
-        parts.append(buf)
-    return parts
-
-
 def _split_groups(selector):
     """Split on commas, but not inside [...] or quotes."""
     groups, buf = [], ""

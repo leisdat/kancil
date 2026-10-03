@@ -39,10 +39,6 @@ def scrape_items(root, base_url, item_selector, fields):
     return out
 
 
-def _text_len(node):
-    return len(node.text_content())
-
-
 def _article_item(a, base_url):
     """Split an <article> into title / url / links / image / meta.
 

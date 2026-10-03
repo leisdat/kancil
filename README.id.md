@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-3.14.0-brightgreen" alt="version">
-  <img src="https://img.shields.io/badge/tests-150%20unit%20%2B%205%20live-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/tests-201%20unit%20%2B%205%20live-brightgreen" alt="tests">
   <img src="https://img.shields.io/badge/size-%7E100%20KB-blue" alt="size">
   <img src="https://img.shields.io/badge/dependencies-0-blue" alt="zero deps">
   <img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="python">
@@ -68,7 +68,7 @@ kancil/                        # project root
     devtools.py                # scraper, reader/extract, network/perf helpers
     session.py                 # persistent state (~/.kancil/)
     repl.py                    # kancil shell  (REPL interaktif)
-  tests/                       # 171 unit test + 5 live test (stdlib unittest)
+  tests/                       # 201 unit test + 5 live test (stdlib unittest)
 ```
 
 ## Dua engine, satu API
@@ -93,7 +93,7 @@ kancil/                        # project root
 | **Stealth (sembunyikan jejak WebView)** | ❌ | ⚠️ (butuh Camoufox) | ✅ (default ON) |
 
 Engine `webview` nyambung ke aplikasi **Kancil Browser** (folder `android/`,
-APK ~85 KB) yang jalan di HP yang sama — Chromium beneran (System WebView).
+APK ~90 KB) yang jalan di HP yang sama — Chromium beneran (System WebView).
 Login/captcha cukup sekali di app, agent di Termux pakai session-nya terus:
 `kancil open --engine webview https://example.com`.
 

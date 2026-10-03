@@ -1434,10 +1434,6 @@ class Kancil:
 
 
 # Action table for Kancil.tool(). Maps action -> (instance, payload) -> result.
-def _p(payload, *keys, default=None):
-    return {k: payload[k] for k in keys if k in payload}
-
-
 Kancil._TOOL_ACTIONS = {
     # navigation
     "open": lambda s, p: s.open(p.get("url", "")),

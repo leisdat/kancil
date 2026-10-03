@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-3.14.0-brightgreen" alt="version">
-  <img src="https://img.shields.io/badge/tests-150%20unit%20%2B%205%20live-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/tests-201%20unit%20%2B%205%20live-brightgreen" alt="tests">
   <img src="https://img.shields.io/badge/size-%7E100%20KB-blue" alt="size">
   <img src="https://img.shields.io/badge/dependencies-0-blue" alt="zero deps">
   <img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="python">
@@ -80,7 +80,7 @@ full playback realistically needs a logged-in session).
 screenshots, PDF. Same API. Auto-detects Camoufox on Termux.
 
 **📱 WebView engine (new)** — `--engine webview` drives the
-**Kancil Browser** Android app (`android/`, ~85 KB APK) on the same phone:
+**Kancil Browser** Android app (`android/`, ~90 KB APK) on the same phone:
 real Chromium via System WebView. Log in / solve captchas once in the app,
 the Termux agent reuses that live session. Element queries pierce shadow DOM
 + same-origin iframes (cross-origin frames are unreachable by same-origin
@@ -180,7 +180,7 @@ kancil yt-play "termux tutorial" --port 8901
 ## Tests
 
 ```
-171 unit tests (stdlib unittest) + 5 live tests (public URLs, real Chromium)
+201 unit tests (stdlib unittest) + 5 live tests (public URLs, real Chromium)
 $ python3 -m unittest tests.test_browser
 $ python3 -m unittest tests.test_live      # needs network + chromium
 ```

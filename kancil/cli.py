@@ -191,7 +191,6 @@ def build_parser():
     ct.add_argument("url")
     ct.add_argument("click_selector")
     ct.add_argument("wait_selector")
-    ct.add_argument("--timeout", type=int, default=25)
     ct.add_argument("--confirm", action="store_true",
                     help="required to click in --dry-run mode")
     SP("composer-open",
@@ -535,7 +534,8 @@ def dispatch(b, args):
         return b.longpress(args.selector)
     if c == "click-through":
         return b.click_through(args.url, args.click_selector,
-                               args.wait_selector, timeout=args.timeout,
+                               args.wait_selector,
+                               timeout=getattr(args, "timeout", None) or 25,
                                confirm=args.confirm)
     if c == "composer-open":
         return b.composer_open()

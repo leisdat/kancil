@@ -1371,6 +1371,10 @@ public class MainActivity extends Activity {
     // ---------- JS bridge (worker thread -> UI thread) ----------
 
     private String evalJs(String expr) throws Exception {
+        // Never block the UI thread waiting for itself -> ANR. All current
+        // callers run on agent worker threads; fail fast if that changes.
+        if (isUiThread())
+            throw new IllegalStateException("evalJs called on UI thread");
         final AtomicReference<String> out = new AtomicReference<>();
         final CountDownLatch latch = new CountDownLatch(1);
         ui.post(() -> activeWeb().evaluateJavascript(expr, v -> {
@@ -1966,6 +1970,8 @@ public class MainActivity extends Activity {
     private interface UiGet<T> { T get(); }
 
     private <T> T uiGet(UiGet<T> f) throws Exception {
+        if (isUiThread())
+            throw new IllegalStateException("uiGet called on UI thread");
         final AtomicReference<T> out = new AtomicReference<>();
         final CountDownLatch latch = new CountDownLatch(1);
         ui.post(() -> { out.set(f.get()); latch.countDown(); });

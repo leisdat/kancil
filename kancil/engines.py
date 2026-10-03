@@ -863,12 +863,6 @@ class StaticEngine:
             return {"success": False, "errors": ["no element matches %r" % query]}
         return {"success": True, "method": method, "node": node}
 
-    def _el_by_ref(self, ref):
-        p = self.page
-        if p:
-            return p, p.el(ref)
-        return None, None
-
     def _form_of(self, node):
         p = self.page
         anc = node.parent
