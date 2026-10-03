@@ -3,11 +3,13 @@
 set -e
 cd "$(dirname "$0")"
 
-SDK=/opt/android-sdk
-ANDROID_JAR=$SDK/platforms/android-34/android.jar
+# SDK lives in $HOME so it survives VM replacements (/opt is ephemeral).
+# Override with ANDROID_SDK_ROOT env if needed.
+SDK=${ANDROID_SDK_ROOT:-$HOME/android-sdk}
+ANDROID_JAR=$SDK/platforms/android-34-ext12/android.jar
 BT=$SDK/build-tools/34.0.0
 # d8 (R8 8.2) crash di JDK 21 -> paksa JDK 17
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+export JAVA_HOME=$HOME/jdk17
 export PATH=$JAVA_HOME/bin:$BT:$PATH
 
 echo "== 1. compile resources =="
