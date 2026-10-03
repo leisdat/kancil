@@ -88,7 +88,10 @@ policy); `click` reports the landing URL/title, `open --idle` settles the
 page like a human. Includes JS console capture,
 pattern-based request blocking (`kancil block add <pattern>`), popup-ad
 killer (gesture-less auto-popups blocked outright; tap-triggered popups
-closed if they navigate to an ad host), native
+closed if they navigate to an ad host), fullscreen video support
+(`onShowCustomView`, back exits fullscreen), manual **DevTools**
+(Console/JavaScript/Network per tab, no agent needed), night mode that
+pierces shadow DOM (YouTube thumbnails stay normal), native
 full-page + element screenshots, video listing, form fill, file upload,
 download manager — all agent-controlled, zero new dependencies. A foreground
 service ("Jaga agent tetap hidup") keeps the app alive against MIUI/EMUI
