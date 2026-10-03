@@ -2451,8 +2451,19 @@ class WebViewEngineTest(unittest.TestCase):
         r = self.eng.block_clear()
         self.assertTrue(r["success"], r)
 
-    def test_screenshot_retries_on_bad_png(self):
-        # first response is garbage, second is a PNG -> success via retry
+    def test_click_through(self):
+        # open (idle) -> click -> wait, all in one mock session
+        r = self.eng.click_through("example.com", "#b1", "#b1", timeout=5)
+        self.assertTrue(r["success"], r)
+        self.assertEqual([s[0] for s in r["steps"]],
+                         ["open", "click", "wait"])
+
+    def test_click_through_click_fail(self):
+        r = self.eng.click_through("example.com", "#nope", "#b1", timeout=5)
+        self.assertFalse(r["success"])
+        self.assertEqual([s[0] for s in r["steps"]], ["open", "click"])
+
+    def test_screenshot_retries_on_bad_png(self):        # first response is garbage, second is a PNG -> success via retry
         calls = {"n": 0}
         orig = self.eng._req
         png = (b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)

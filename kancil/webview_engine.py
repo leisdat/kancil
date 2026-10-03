@@ -641,6 +641,42 @@ class WebViewEngine:
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
+    def click_through(self, url, click_selector, wait_selector,
+                      timeout=25, confirm=False):
+        """SPA warm navigation in ONE process: open url (settled) ->
+        click click_selector -> wait for wait_selector.
+
+        Many mobile SPAs (e.g. m.facebook composer) don't render their
+        editor on a direct-URL load — they need the warm state from a
+        click. Doing the three steps here keeps one live session, so tab
+        IDs can't shift between commands (the CLI-per-command flake).
+        """
+        try:
+            steps = []
+            r = self.open(url, idle=True)
+            steps.append(("open", r.get("success", False)))
+            if not r.get("success"):
+                return {"success": False, "errors": r.get("errors", ["open failed"]),
+                        "steps": steps}
+            r = self.click(click_selector, confirm=confirm)
+            steps.append(("click", r.get("success", False)))
+            if not r.get("success"):
+                return {"success": False, "errors": r.get("errors", ["click failed"]),
+                        "steps": steps}
+            old_timeout, self.timeout = self.timeout, timeout
+            try:
+                r = self.wait(selector=wait_selector)
+            finally:
+                self.timeout = old_timeout
+            steps.append(("wait", r.get("success", False)))
+            if not r.get("success"):
+                return {"success": False, "errors": r.get("errors", ["wait failed"]),
+                        "steps": steps}
+            return {"success": True, "steps": steps,
+                    "wait_selector": wait_selector}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
     def console(self):
         """JS console messages captured by the APK's console override."""
         try:

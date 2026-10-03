@@ -183,6 +183,15 @@ def build_parser():
                     help="target element (default: focused element)")
     lp = SP("longpress", help="mobile long-press on element (context menu)")
     lp.add_argument("selector")
+    ct = SP("click-through",
+            help="SPA warm nav in one process: open URL (settled) -> "
+                 "click selector -> wait for selector")
+    ct.add_argument("url")
+    ct.add_argument("click_selector")
+    ct.add_argument("wait_selector")
+    ct.add_argument("--timeout", type=int, default=25)
+    ct.add_argument("--confirm", action="store_true",
+                    help="required to click in --dry-run mode")
     SP("wait-idle", help="wait for page settle: readyState + network quiet")
     el = SP("select", help="choose dropdown option")
     el.add_argument("selector")
@@ -515,6 +524,10 @@ def dispatch(b, args):
         return b.press(args.key, args.selector)
     if c == "longpress":
         return b.longpress(args.selector)
+    if c == "click-through":
+        return b.click_through(args.url, args.click_selector,
+                               args.wait_selector, timeout=args.timeout,
+                               confirm=args.confirm)
     if c == "wait-idle":
         return b.wait_idle()
     if c == "clear":

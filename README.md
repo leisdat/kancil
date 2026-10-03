@@ -157,6 +157,12 @@ kancil --engine webview longpress ".tweet"     # mobile long-press (context menu
 kancil --engine webview --dry-run form fill 1 --set "isi=Halo"
 kancil --engine webview --dry-run click "#post-btn" --confirm
 
+# SPA warm navigation in one process: open -> click -> wait.
+# m.facebook's composer only renders via click from the feed, NOT via
+# direct URL (SPA needs the warm feed state) — same for many mobile SPAs:
+kancil --engine webview click-through https://m.facebook.com \
+  '[aria-label="Posting status baru"]' '[contenteditable="true"]'
+
 # watch YouTube, mini style
 kancil yt-play "termux tutorial" --port 8901
 ```

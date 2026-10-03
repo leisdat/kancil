@@ -121,6 +121,11 @@ Login/captcha cukup sekali di app, agent di Termux pakai session-nya terus:
 > Aman: `--dry-run` — isi form/composer sepuasnya, click/submit ke-block
 > kecuali `--confirm` (anti publish tak sengaja).
 >
+> Navigasi warm SPA dalam satu proses: `click-through <url> <klik-selector>
+> <tunggu-selector>` — buka (settled) → klik → tunggu. Composer m.facebook
+> cuma render lewat klik dari feed, BUKAN lewat URL langsung (SPA butuh warm
+> state dari feed) — berlaku juga buat banyak SPA mobile lain.
+>
 > Kalau app crash saat di-drive agent, UncaughtExceptionHandler restart
 > otomatis (max 3x per 5 menit, anti loop) dan stacktrace bisa dibaca via
 > `kancil --engine webview crashes`.

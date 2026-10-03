@@ -329,6 +329,15 @@ class Kancil:
         return {"success": False,
                 "errors": ["longpress() is webview-engine only"]}
 
+    def click_through(self, url, click_selector, wait_selector,
+                      timeout=25, confirm=False):
+        if self._engine_name == "webview":
+            return self._wrap(self.engine.click_through(
+                url, click_selector, wait_selector,
+                timeout=timeout, confirm=confirm))
+        return {"success": False,
+                "errors": ["click_through() is webview-engine only"]}
+
     def console(self):
         return self._wrap(self.engine.console())
 
