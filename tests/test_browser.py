@@ -2222,6 +2222,9 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
                         "url": "https://example.com/",
                         "title": "WV Test", "network_count": 1,
                         "tab": 1, "tab_count": len(self.TABS)})
+        elif p == "/crashes":
+            self._json({"ok": True, "crash_count": 0,
+                        "crash_last": 0, "last_crash": None})
         elif p == "/tabs":
             self._json({"ok": True, "tabs": self.TABS, "active": 1})
         elif p == "/dom":
@@ -2333,6 +2336,9 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
         elif p == "/blocklist":
             self._json({"ok": True,
                         "patterns": len(body.get("patterns", []))})
+        elif p == "/crashes":
+            self._json({"ok": True, "crash_count": 0,
+                        "crash_last": 0, "last_crash": None})
         elif p == "/tabs/new":
             t = {"id": 2, "url": body.get("url", ""),
                  "title": "New", "active": True}
@@ -2368,6 +2374,34 @@ class WebViewEngineTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.srv.shutdown()
+
+    def test_dry_run_blocks_click_and_submit(self):
+        from kancil.webview_engine import WebViewEngine
+        eng = WebViewEngine(port=self.port, timeout=10, dry_run=True)
+        try:
+            self.assertTrue(eng.dry_run)
+            r = eng.click("#b1")
+            self.assertFalse(r["success"])
+            self.assertIn("dry-run", r["errors"][0])
+            r = eng.click("#b1", confirm=True)
+            self.assertTrue(r["success"], r)
+            r = eng.submit_form(0)
+            self.assertFalse(r["success"])
+            self.assertIn("dry-run", r["errors"][0])
+            r = eng.submit_form(0, confirm=True)
+            self.assertTrue(r["success"], r)
+        finally:
+            eng.close()
+
+    def test_dry_run_off_by_default(self):
+        self.assertFalse(self.eng.dry_run)
+        self.assertTrue(self.eng.click("#b1")["success"])
+
+    def test_crashes(self):
+        r = self.eng.crashes()
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["crash_count"], 0)
+        self.assertIsNone(r["last_crash"])
 
     def test_unreachable_fails_fast(self):
         from kancil.webview_engine import WebViewEngine

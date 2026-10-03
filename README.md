@@ -72,7 +72,9 @@ errors (`ELEMENT_NOT_FOUND`, `TIMEOUT`, …). `batch` runs 25 actions per
 call; `network_curl` replays any logged request as curl.
 
 **🎬 YouTube kit** — `yt-search` (via `ytInitialData`, no JS),
-`yt-video` metadata, `yt-play` mini player.
+`yt-video` metadata, `yt-play` mini player (opens the video and triggers
+play; sustained playback for guests can be gated/paused by YouTube —
+full playback realistically needs a logged-in session).
 
 **🧩 Playwright engine (optional)** — real Chromium for full JS,
 screenshots, PDF. Same API. Auto-detects Camoufox on Termux.
@@ -85,9 +87,19 @@ pattern-based request blocking (`kancil block add <pattern>`), native
 full-page + element screenshots, video listing, form fill, file upload,
 download manager — all agent-controlled, zero new dependencies. A foreground
 service ("Jaga agent tetap hidup") keeps the app alive against MIUI/EMUI
-task killers. **Stealth mode** (default ON) hides the small WebView tells:
+task killers. If the app does crash, an `UncaughtExceptionHandler`
+auto-restarts it (max 3× per 5 min, loop-guarded) and the stacktrace stays
+readable via `kancil --engine webview crashes`. **Stealth mode** (default ON) hides the small WebView tells:
 strips `Version/4.0` from the UA, locks `navigator.webdriver`, stubs
 `window.chrome` — the phone's genuine hardware does the rest.
+
+> **WebView = session-stateful: drive it from ONE process.** Every
+> `kancil ...` CLI call is a new process that re-reads `/status`; if Android
+> recreates the app in the background, tab IDs can shift between commands.
+> For any multi-step flow use `kancil --engine webview shell` (one live
+> session) or `kancil daemon start` — never per-command CLI for flows.
+> New patterns pushed via `block add` also scrub the HTTP cache, because
+> cached resources would otherwise bypass the blocklist.
 
 ## Quickstart
 
@@ -129,6 +141,11 @@ kancil --engine webview console  # real JS console capture
 kancil --engine webview block add ads.example   # pattern request blocking
 kancil --engine webview download https://example.com/f.zip
 kancil --engine webview upload /sdcard/pic.jpg  # next file-chooser is fed
+kancil --engine webview crashes  # last app crash report, if the APK died
+# dry-run: verify forms/composer freely, clicks+submits are blocked
+# unless you pass --confirm (anti accidental publish)
+kancil --engine webview --dry-run form fill 1 --set "isi=Halo"
+kancil --engine webview --dry-run click "#post-btn" --confirm
 
 # watch YouTube, mini style
 kancil yt-play "termux tutorial" --port 8901

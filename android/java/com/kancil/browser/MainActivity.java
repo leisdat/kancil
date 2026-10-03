@@ -5,6 +5,7 @@ import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.app.PendingIntent;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Build;
@@ -105,6 +106,10 @@ public class MainActivity extends Activity {
     private AgentServer server;
     private boolean agentUp = false;
     private SharedPreferences prefs;
+    /** True when the last screenshot() fell back to drawWebView()
+     *  (backgrounded, no window surface): the capture is WebView-sized,
+     *  so elementScreenshot() must not apply the window offset. */
+    private volatile boolean lastShotWebViewOnly = false;
 
     // search engines: key -> {label, home, search url prefix}
     private static final String[][] ENGINES = {
@@ -130,6 +135,47 @@ public class MainActivity extends Activity {
             "scorecardresearch.com", "quantserve.com",
     };
 
+    /** Crash recovery for agent-driven use: an uncaught exception (e.g. a
+     *  WebView FC while the agent is driving) is recorded to prefs for
+     *  GET /crashes, then the app auto-restarts via AlarmManager — unless
+     *  we've crashed 3+ times in 5 minutes (loop guard). Without this, one
+     *  FC leaves the agent talking to a dead server until Farul reopens
+     *  the app by hand. */
+    private void installCrashRecovery() {
+        Thread.setDefaultUncaughtExceptionHandler((thread, err) -> {
+            try {
+                java.io.StringWriter sw = new java.io.StringWriter();
+                err.printStackTrace(new java.io.PrintWriter(sw));
+                long now = System.currentTimeMillis();
+                long last = prefs.getLong("crash_last", 0);
+                int count = prefs.getInt("crash_count", 0);
+                if (now - last > 5 * 60 * 1000) count = 0;
+                // commit() is synchronous — apply() might not finish
+                // before the killProcess() below.
+                prefs.edit().putString("crash_report", sw.toString())
+                        .putLong("crash_last", now)
+                        .putInt("crash_count", count + 1).commit();
+                if (count < 3) {
+                    Intent i = new Intent(getApplicationContext(),
+                            MainActivity.class);
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                    PendingIntent pi = PendingIntent.getActivity(
+                            getApplicationContext(), 0, i,
+                            PendingIntent.FLAG_ONE_SHOT
+                            | PendingIntent.FLAG_IMMUTABLE);
+                    android.app.AlarmManager am =
+                            (android.app.AlarmManager)
+                            getSystemService(ALARM_SERVICE);
+                    if (am != null)
+                        am.set(android.app.AlarmManager.RTC_WAKEUP,
+                                now + 2000, pi);
+                }
+            } catch (Exception ignored) {}
+            android.os.Process.killProcess(android.os.Process.myPid());
+        });
+    }
+
     @Override
     protected void onCreate(Bundle b) {
         // Theme must be set before super.onCreate (base context is attached).
@@ -138,6 +184,7 @@ public class MainActivity extends Activity {
                 ? R.style.Theme_Kancil_Dark : R.style.Theme_Kancil);
         super.onCreate(b);
         prefs = p0;
+        installCrashRecovery();
         setContentView(R.layout.activity_main);
         webContainer = findViewById(R.id.web_container);
         urlBar = findViewById(R.id.url_bar);
@@ -1282,7 +1329,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.7");
+                            oo.put("agent", "kancil-browser/1.8");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -1291,6 +1338,23 @@ public class MainActivity extends Activity {
                         } catch (Exception ignored) {}
                         return oo;
                     });
+                    return AgentServer.Response.json(o);
+                }
+                case "/crashes": {
+                    if ("POST".equals(method) || "DELETE".equals(method)) {
+                        prefs.edit().remove("crash_report")
+                                .putInt("crash_count", 0).apply();
+                        JSONObject o = new JSONObject();
+                        o.put("ok", true);
+                        return AgentServer.Response.json(o);
+                    }
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true);
+                    o.put("crash_count", prefs.getInt("crash_count", 0));
+                    o.put("crash_last", prefs.getLong("crash_last", 0));
+                    String rep = prefs.getString("crash_report", null);
+                    o.put("last_crash",
+                            rep == null ? JSONObject.NULL : rep);
                     return AgentServer.Response.json(o);
                 }
                 case "/tabs": {
@@ -1437,6 +1501,14 @@ public class MainActivity extends Activity {
                         JSONObject o = new JSONObject();
                         o.put("ok", true);
                         o.put("patterns", agentBlock.size());
+                        // Cached resources bypass shouldInterceptRequest, so a
+                        // new block would miss them: scrub the HTTP cache
+                        // (app-wide) so the next load re-hits the blocklist.
+                        ui.post(() -> {
+                            try { activeWeb().clearCache(true); }
+                            catch (Exception ignored) {}
+                        });
+                        o.put("cache_cleared", true);
                         agentNote("blocklist " + agentBlock.size() + " patterns");
                         return AgentServer.Response.json(o);
                     }
@@ -1643,6 +1715,7 @@ public class MainActivity extends Activity {
                         Bitmap.Config.ARGB_8888);
                 if (Build.VERSION.SDK_INT >= 26) {
                     try {
+                        lastShotWebViewOnly = false;
                         ref.set(bmp);
                         PixelCopy.request(getWindow(), bmp,
                                 copyResult -> latch.countDown(),
@@ -1651,10 +1724,12 @@ public class MainActivity extends Activity {
                         // App backgrounded/frozen: window has no backing
                         // surface. Fall back to drawing the WebView
                         // directly — works without a surface.
+                        lastShotWebViewOnly = true;
                         ref.set(drawWebView());
                         latch.countDown();
                     }
                 } else {
+                    lastShotWebViewOnly = false;
                     ref.set(bmp);
                     root.draw(new android.graphics.Canvas(bmp));
                     latch.countDown();
@@ -1747,37 +1822,62 @@ public class MainActivity extends Activity {
     }
 
     /** Element screenshot: scroll the element to viewport center, capture
-     *  the window, crop natively. Called on a worker thread. */
+     *  the window, crop natively. Called on a worker thread.
+     *  The rect is re-queried AFTER the scroll settles (layout can shift
+     *  between the scroll and the capture = the old race), and the crop
+     *  accounts for the WebView's offset inside the window (toolbar). */
     private byte[] elementScreenshot(String selector) throws Exception {
         String q = selector.replace("\\", "\\\\").replace("\"", "\\\"");
         String r = evalJs("(function(s){try{"
                 + "var el=document.querySelector(\"" + q + "\");"
                 + "if(!el)return 'null';"
                 + "el.scrollIntoView({block:'center',inline:'center'});"
+                + "return 'ok';}"
+                + "catch(e){return 'ERR:'+e.message}})(\"" + q + "\")");
+        if (r == null || r.equals("null") || r.startsWith("ERR:"))
+            throw new Exception("element not found: " + selector);
+        Thread.sleep(400); // let the scroll settle (worker thread)
+        // Fresh rect after settling — the pre-sleep rect may be stale.
+        r = evalJs("(function(s){try{"
+                + "var el=document.querySelector(\"" + q + "\");"
+                + "if(!el)return 'null';"
                 + "var b=el.getBoundingClientRect();"
-                + "return b.width+'|'+b.height+'|'+window.innerWidth;}"
+                + "return b.left+'|'+b.top+'|'+b.width+'|'+b.height"
+                + "+'|'+window.innerWidth;}"
                 + "catch(e){return 'ERR:'+e.message}})(\"" + q + "\")");
         if (r == null || r.equals("null") || r.startsWith("ERR:"))
             throw new Exception("element not found: " + selector);
         String[] parts = r.split("\\|");
-        double ew = Double.parseDouble(parts[0]);
-        double eh = Double.parseDouble(parts[1]);
-        double cssW = parts.length > 2 ? Double.parseDouble(parts[2]) : 0;
-        Thread.sleep(400); // let the scroll settle (worker thread)
-        final int vw = uiGet(() -> activeWeb().getWidth());
+        double rx = Double.parseDouble(parts[0]);
+        double ry = Double.parseDouble(parts[1]);
+        double ew = Double.parseDouble(parts[2]);
+        double eh = Double.parseDouble(parts[3]);
+        double cssW = parts.length > 4 ? Double.parseDouble(parts[4]) : 0;
+        final int[] loc = uiGet(() -> {
+            WebView wv = activeWeb();
+            int[] l = new int[2];
+            wv.getLocationInWindow(l);
+            return new int[]{l[0], l[1], wv.getWidth()};
+        });
         byte[] win = screenshot();
         Bitmap bmp = android.graphics.BitmapFactory.decodeByteArray(
                 win, 0, win.length);
         if (bmp == null) throw new Exception("capture failed");
         // CSS px -> device px: window shot is device pixels, rect is CSS px.
-        float scale = (cssW > 0) ? (float) vw / (float) cssW : 1f;
+        float scale = (cssW > 0) ? (float) loc[2] / (float) cssW : 1f;
         if (scale <= 0 || scale > 10) scale = 1f; // sanity
-        int cw = Math.min(bmp.getWidth(),
+        // Window shot includes the toolbar; the drawWebView() fallback
+        // (backgrounded) is WebView-sized, so its offset is (0,0).
+        int ox = lastShotWebViewOnly ? 0 : loc[0];
+        int oy = lastShotWebViewOnly ? 0 : loc[1];
+        int cx = Math.max(0, ox + (int) (rx * scale));
+        int cy = Math.max(0, oy + (int) (ry * scale));
+        int cw = Math.min(bmp.getWidth() - cx,
                 Math.max(1, (int) (ew * scale)));
-        int ch = Math.min(bmp.getHeight(),
+        int ch = Math.min(bmp.getHeight() - cy,
                 Math.max(1, (int) (eh * scale)));
-        int cx = Math.max(0, (bmp.getWidth() - cw) / 2);
-        int cy = Math.max(0, (bmp.getHeight() - ch) / 2);
+        if (cw <= 0 || ch <= 0)
+            throw new Exception("element outside capture area");
         Bitmap crop = Bitmap.createBitmap(bmp, cx, cy, cw, ch);
         bmp.recycle();
         ByteArrayOutputStream bos = new ByteArrayOutputStream();

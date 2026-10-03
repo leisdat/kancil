@@ -33,11 +33,12 @@ class Kancil:
                  cookie_file=None, profile=None, proxy=None, ua=None,
                  pw_session=None, pw_browser="chromium",
                  pw_executable_path=None, cache=True,
-                 webview_host=None, webview_port=None):
+                 webview_host=None, webview_port=None, dry_run=False):
         self.profile = profile or {}
         self.proxy = proxy
         self.ua = ua
         self.cache = cache
+        self.dry_run = dry_run
         self.pw_session = pw_session
         self.pw_browser = pw_browser
         self.pw_executable_path = pw_executable_path
@@ -69,6 +70,7 @@ class Kancil:
                 kw["host"] = self.webview_host
             if self.webview_port:
                 kw["port"] = self.webview_port
+            kw["dry_run"] = self.dry_run
             return WebViewEngine(**kw)
         return engines.StaticEngine(timeout=timeout, retries=retries,
                                     cookie_file=cookie_file,
@@ -269,7 +271,9 @@ class Kancil:
         return ok(query=query, role=role, count=len(matches),
                   matches=matches[:20])
 
-    def click(self, selector):
+    def click(self, selector, confirm=False):
+        if self._engine_name == "webview":
+            return self._wrap(self.engine.click(selector, confirm=confirm))
         return self._wrap(self.engine.click(selector))
 
     def type(self, selector, text):
@@ -305,6 +309,12 @@ class Kancil:
 
     def console(self):
         return self._wrap(self.engine.console())
+
+    def crashes(self, clear=False):
+        if self._engine_name == "webview":
+            return self._wrap(self.engine.crashes(clear=clear))
+        return {"success": False,
+                "errors": ["crashes() is webview-engine only"]}
 
     def errors(self):
         errs = self.engine.errors
@@ -756,7 +766,10 @@ class Kancil:
     def form_fill(self, form_id, values=None, auto=False):
         return self._wrap(self.engine.fill_form(form_id - 1, values, auto, self.profile))
 
-    def form_submit(self, form_id):
+    def form_submit(self, form_id, confirm=False):
+        if self._engine_name == "webview":
+            return self._wrap(
+                self.engine.submit_form(form_id - 1, confirm=confirm))
         return self._wrap(self.engine.submit_form(form_id - 1))
 
     # ---------- downloads ----------

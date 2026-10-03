@@ -29,7 +29,8 @@ def get_browser(args):
                cookie_file=cookie_file, profile=st.get("profile", {}),
                proxy=proxy, ua=ua, pw_session=pw_session,
                pw_browser=pw_browser, pw_executable_path=pw_executable_path,
-               cache=not getattr(args, "no_cache", False))
+               cache=not getattr(args, "no_cache", False),
+               dry_run=getattr(args, "dry_run", False))
     b.import_state(st)
     return b, st
 
@@ -120,6 +121,10 @@ def _common_flags(ap, suppress=False):
                     default=argparse.SUPPRESS if suppress else False,
                     help="disable the static engine's HTTP cache "
                          "(ETag/Last-Modified revalidation)")
+    ap.add_argument("--dry-run", action="store_true",
+                    default=argparse.SUPPRESS if suppress else False,
+                    help="webview engine: block click/submit unless "
+                         "--confirm is passed (anti accidental publish)")
     ap.add_argument("--local", action="store_true",
                     default=argparse.SUPPRESS if suppress else False,
                     help="bypass a running kancil daemon; run in this process")
@@ -162,6 +167,8 @@ def build_parser():
 
     el = SP("click", help="click element")
     el.add_argument("selector")
+    el.add_argument("--confirm", action="store_true",
+                    help="required to actuate in --dry-run mode")
     el = SP("type", help="type into element")
     el.add_argument("selector")
     el.add_argument("text")
@@ -186,6 +193,8 @@ def build_parser():
     w.add_argument("--ms", type=int, default=None)
     w.add_argument("--text", default=None)
     SP("console", help="JS console logs")
+    cr = SP("crashes", help="last app crash report (webview engine)")
+    cr.add_argument("--clear", action="store_true")
     SP("errors", help="error console")
 
     sh = SP("screenshot", help="take screenshot (playwright engine)")
@@ -249,6 +258,8 @@ def build_parser():
     fi.add_argument("id", type=int)
     fi.add_argument("--auto", action="store_true")
     fi.add_argument("--set", action="append", default=[], help="field=value")
+    fi.add_argument("--confirm", action="store_true",
+                    help="required to submit in --dry-run mode")
 
     dl = SP("download", help="download URL")
     dl.add_argument("url")
@@ -487,7 +498,7 @@ def dispatch(b, args):
         if args.action == "xpath":
             return b.dom_xpath(args.target or "")
     if c == "click":
-        return b.click(args.selector)
+        return b.click(args.selector, confirm=args.confirm)
     if c == "type":
         return b.type(args.selector, args.text)
     if c == "clear":
@@ -512,6 +523,8 @@ def dispatch(b, args):
         return b.wait(selector=args.target)
     if c == "console":
         return b.console()
+    if c == "crashes":
+        return b.crashes(clear=args.clear)
     if c == "errors":
         return b.errors()
     if c == "screenshot":
@@ -613,7 +626,7 @@ def dispatch(b, args):
             r = b.form_fill(args.id, values or None, auto=args.auto)
             return r
         if args.action == "submit":
-            return b.form_submit(args.id)
+            return b.form_submit(args.id, confirm=args.confirm)
     if c == "download":
         return b.download(args.url, args.out)
     if c == "downloads":

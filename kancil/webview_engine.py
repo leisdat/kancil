@@ -59,6 +59,10 @@ class WebViewEngine:
         self._a11y_css = {}
         self._page_cache = None
         self._page_url = None
+        # dry_run: verify text/state all you want, but block actuating
+        # clicks and form submits unless confirm=True is passed explicitly.
+        # Guards against an agent accidentally publishing (e.g. FB composer).
+        self.dry_run = bool(kwargs.get("dry_run", False))
         # fail fast with a clear message when the app isn't running
         try:
             st = self._get("/status")
@@ -352,7 +356,10 @@ class WebViewEngine:
 
     # ---------- actions ----------
 
-    def click(self, query):
+    def click(self, query, confirm=False):
+        if self.dry_run and not confirm:
+            return {"success": False, "errors": [
+                "dry-run: click blocked — pass confirm=True to actuate"]}
         try:
             r = self._post("/js", {"expr":
                 "(function(){var el=%s;"
@@ -587,6 +594,22 @@ class WebViewEngine:
         except Exception as e:
             return {"success": False, "errors": [str(e)[:150]]}
 
+    def crashes(self, clear=False):
+        """Last app crash recorded by the APK's UncaughtExceptionHandler
+        (auto-restart guard: 3 restarts per 5 min). Lets the agent see WHY
+        the app died without needing the Android crash dialog."""
+        try:
+            if clear:
+                r = self._post("/crashes", {})
+            else:
+                r = self._get("/crashes")
+            if isinstance(r, dict):
+                r["success"] = r.get("ok", True)
+                return r
+            return {"success": False, "errors": ["bad /crashes response"]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
     # ---------- screenshot / cookies / network ----------
 
     def screenshot(self, path=None, full=False, selector=None):
@@ -708,7 +731,10 @@ class WebViewEngine:
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
-    def submit_form(self, fidx):
+    def submit_form(self, fidx, confirm=False):
+        if self.dry_run and not confirm:
+            return {"success": False, "errors": [
+                "dry-run: submit blocked — pass confirm=True to actuate"]}
         try:
             r = self._post("/form/fill",
                            {"form": fidx, "fields": {}, "submit": True})
