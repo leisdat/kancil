@@ -683,26 +683,33 @@ class WebViewEngine:
 
     def screenshot(self, path=None, full=False, selector=None):
         # Element screenshots via the agent's native rect+scroll+crop.
+        # One retry: full-page capture can flake ("Connection reset") when
+        # the app is busy rendering.
         path = path or os.path.join(session_mod.SCREEN_DIR,
                                     "shot-%d.png" % int(time.time()))
-        try:
-            if selector:
-                r = self._req("GET", "/screenshot/element?selector="
-                              + urllib.parse.quote(selector, safe=""))
-            else:
-                r = self._req("GET",
-                              "/screenshot/full" if full else "/screenshot")
-            raw = r.get("raw", b"")
-            if not raw or raw[:8] != b"\x89PNG\r\n\x1a\n":
-                return {"success": False,
-                        "errors": ["agent did not return a PNG"]}
-            with open(path, "wb") as f:
-                f.write(raw)
-            return {"success": True, "supported": True, "path": path,
-                    "bytes": len(raw), "full": bool(full),
-                    "selector": selector}
-        except Exception as e:
-            return {"success": False, "errors": [str(e)[:200]]}
+        last_err = None
+        for _ in range(2):
+            try:
+                if selector:
+                    r = self._req("GET", "/screenshot/element?selector="
+                                  + urllib.parse.quote(selector, safe=""))
+                else:
+                    r = self._req("GET",
+                                  "/screenshot/full" if full else "/screenshot")
+                raw = r.get("raw", b"")
+                if not raw or raw[:8] != b"\x89PNG\r\n\x1a\n":
+                    last_err = "agent did not return a PNG"
+                    time.sleep(1)
+                    continue
+                with open(path, "wb") as f:
+                    f.write(raw)
+                return {"success": True, "supported": True, "path": path,
+                        "bytes": len(raw), "full": bool(full),
+                        "selector": selector}
+            except Exception as e:
+                last_err = str(e)[:200]
+                time.sleep(1)
+        return {"success": False, "errors": [last_err or "screenshot failed"]}
 
     def cookies(self):
         try:
@@ -937,7 +944,8 @@ class WebViewEngine:
                     cur.append(p)
             r = self._post("/blocklist", {"patterns": cur})
             if isinstance(r, dict) and r.get("ok"):
-                return {"success": True, "patterns": cur}
+                return {"success": True, "patterns": cur,
+                        "cache_mode": r.get("cache_mode", "?")}
             return {"success": False,
                     "errors": [str(r)[:200]]}
         except Exception as e:

@@ -305,6 +305,13 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
+        // While the agent blocklist is non-empty, bypass the HTTP cache:
+        // cached/revalidated resources can skip shouldInterceptRequest,
+        // which would let blocks leak.
+        synchronized (agentBlock) {
+            s.setCacheMode(agentBlock.isEmpty() ? WebSettings.LOAD_DEFAULT
+                    : WebSettings.LOAD_NO_CACHE);
+        }
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setBuiltInZoomControls(true);
@@ -1400,7 +1407,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.10");
+                            oo.put("agent", "kancil-browser/1.11");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -1606,12 +1613,25 @@ public class MainActivity extends Activity {
                         o.put("patterns", agentBlock.size());
                         // Cached resources bypass shouldInterceptRequest, so a
                         // new block would miss them: scrub the HTTP cache
-                        // (app-wide) so the next load re-hits the blocklist.
+                        // (app-wide) and force LOAD_NO_CACHE on every tab
+                        // while any pattern is active — block means block.
+                        final boolean noCache;
+                        synchronized (agentBlock) {
+                            noCache = !agentBlock.isEmpty();
+                        }
                         ui.post(() -> {
-                            try { activeWeb().clearCache(true); }
-                            catch (Exception ignored) {}
+                            try {
+                                for (Tab t : new java.util.ArrayList<>(tabs)) {
+                                    t.web.clearCache(true);
+                                    t.web.getSettings().setCacheMode(noCache
+                                            ? WebSettings.LOAD_NO_CACHE
+                                            : WebSettings.LOAD_DEFAULT);
+                                }
+                            } catch (Exception ignored) {}
                         });
                         o.put("cache_cleared", true);
+                        o.put("cache_mode",
+                                noCache ? "LOAD_NO_CACHE" : "LOAD_DEFAULT");
                         agentNote("blocklist " + agentBlock.size() + " patterns");
                         return AgentServer.Response.json(o);
                     }
@@ -1907,7 +1927,7 @@ public class MainActivity extends Activity {
                 latch.countDown();
             }
         });
-        if (!latch.await(30, TimeUnit.SECONDS)) throw new Exception("screenshot timeout");
+        if (!latch.await(45, TimeUnit.SECONDS)) throw new Exception("screenshot timeout");
         if (errRef.get() != null)
             throw new Exception("screenshot failed: "
                     + errRef.get().getMessage());
@@ -1994,7 +2014,25 @@ public class MainActivity extends Activity {
      *  The rect is re-queried AFTER the scroll settles (layout can shift
      *  between the scroll and the capture = the old race), and the crop
      *  accounts for the WebView's offset inside the window (toolbar). */
+    /** Element screenshot with one native retry: the capture can flake
+     *  when the app is backgrounded mid-render or the surface is briefly
+     *  invalid. "element not found" is deterministic — not retried. */
     private byte[] elementScreenshot(String selector) throws Exception {
+        Exception last = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                return elementScreenshotOnce(selector);
+            } catch (Exception e) {
+                last = e;
+                String m = e.getMessage();
+                if (m != null && m.startsWith("element not found")) throw e;
+                try { Thread.sleep(600); } catch (InterruptedException ie) { break; }
+            }
+        }
+        throw last;
+    }
+
+    private byte[] elementScreenshotOnce(String selector) throws Exception {
         String q = selector.replace("\\", "\\\\").replace("\"", "\\\"");
         String r = evalJs("(function(s){try{"
                 + "var el=" + DQ + "(s);"

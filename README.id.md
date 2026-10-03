@@ -102,8 +102,8 @@ Login/captcha cukup sekali di app, agent di Termux pakai session-nya terus:
 > background, ID tab bisa bergeser antar-command. Untuk flow multi-langkah
 > pakai `kancil --engine webview shell` (satu sesi hidup) atau
 > `kancil daemon start` — jangan CLI per-command buat flow. Pola baru via
-> `block add` otomatis scrub HTTP cache (resource cached kalau nggak
-> di-scrub bakal lolos dari blocklist).
+> `block add` otomatis scrub HTTP cache + paksa `LOAD_NO_CACHE` di semua tab
+> selama ada pola aktif (block = block, nggak ada yang lolos lewat cache).
 >
 > Perintah lain: `videos` (list video + src), `console`, `block add <pola>`,
 > `download <url>`, `upload <path>` (file chooser), `crashes` (laporan crash

@@ -2334,7 +2334,8 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
                         "filled": list(body.get("fields", {}).keys()),
                         "missing": []})
         elif p == "/blocklist":
-            self._json({"ok": True,
+            self._json({"ok": True, "cache_cleared": True,
+                        "cache_mode": "LOAD_NO_CACHE",
                         "patterns": len(body.get("patterns", []))})
         elif p == "/wait/idle":
             self._json({"ok": True, "idle": True,
@@ -2442,6 +2443,35 @@ class WebViewEngineTest(unittest.TestCase):
         self.assertIn("__kancilQX", js)
         js, _m = self.eng._count_js("//div[@id='x']")
         self.assertIn("__kancilQXA", js)
+
+    def test_block_add_reports_cache_mode(self):
+        r = self.eng.block_add("ads.example")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["cache_mode"], "LOAD_NO_CACHE")
+        r = self.eng.block_clear()
+        self.assertTrue(r["success"], r)
+
+    def test_screenshot_retries_on_bad_png(self):
+        # first response is garbage, second is a PNG -> success via retry
+        calls = {"n": 0}
+        orig = self.eng._req
+        png = (b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+
+        def flaky(method, path, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {"raw": b"garbage"}
+            return {"raw": png}
+        self.eng._req = flaky
+        try:
+            import tempfile, os
+            p = os.path.join(tempfile.gettempdir(), "retry-test.png")
+            r = self.eng.screenshot(path=p)
+            self.assertTrue(r["success"], r)
+            self.assertEqual(calls["n"], 2)
+            os.remove(p)
+        finally:
+            self.eng._req = orig
 
     def test_unreachable_fails_fast(self):
         from kancil.webview_engine import WebViewEngine

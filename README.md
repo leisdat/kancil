@@ -101,8 +101,9 @@ strips `Version/4.0` from the UA, locks `navigator.webdriver`, stubs
 > recreates the app in the background, tab IDs can shift between commands.
 > For any multi-step flow use `kancil --engine webview shell` (one live
 > session) or `kancil daemon start` — never per-command CLI for flows.
-> New patterns pushed via `block add` also scrub the HTTP cache, because
-> cached resources would otherwise bypass the blocklist.
+> New patterns pushed via `block add` scrub the HTTP cache and force
+> `LOAD_NO_CACHE` on every tab while any pattern is active (block = block,
+> nothing leaks through the cache).
 
 ## Quickstart
 
