@@ -140,6 +140,10 @@ Login/captcha cukup sekali di app, agent di Termux pakai session-nya terus:
 > Kalau app crash saat di-drive agent, UncaughtExceptionHandler restart
 > otomatis (max 3x per 5 menit, anti loop) dan stacktrace bisa dibaca via
 > `kancil --engine webview crashes`.
+>
+> Tema **Emerald & Gold**: light mode toolbar putih gading + ikon emerald tua,
+> dark mode noir + emas champagne, progress bar emas, kartu tab ber-ring emas,
+> semua dialog rounded.
 
 ## Troubleshooting (engine webview)
 

@@ -94,7 +94,10 @@ task killers. If the app does crash, an `UncaughtExceptionHandler`
 auto-restarts it (max 3× per 5 min, loop-guarded) and the stacktrace stays
 readable via `kancil --engine webview crashes`. **Stealth mode** (default ON) hides the small WebView tells:
 strips `Version/4.0` from the UA, locks `navigator.webdriver`, stubs
-`window.chrome` — the phone's genuine hardware does the rest.
+`window.chrome` — the phone's genuine hardware does the rest. The app itself
+wears an **Emerald & Gold** theme: warm ivory toolbar + deep emerald icons in
+light mode, noir + champagne gold in dark mode, gold progress bar, gold-ringed
+tab cards, rounded dialogs.
 
 > **WebView = session-stateful: drive it from ONE process.** Every
 > `kancil ...` CLI call is a new process that re-reads `/status`; if Android
