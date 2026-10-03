@@ -101,6 +101,9 @@ public class MainActivity extends Activity {
     private ProgressBar progressBar;
     private TextView agentStatus;
     private TextView agentToast;    private final Handler ui = new Handler(Looper.getMainLooper());
+    /** Fullscreen video (YouTube dsb): view yang lagi fullscreen + callback-nya. */
+    private View customView;
+    private WebChromeClient.CustomViewCallback customViewCallback;
     private final Handler toastHide = new Handler(Looper.getMainLooper());
     private final List<Tab> tabs = new ArrayList<>();
     private Tab active;
@@ -1232,6 +1235,23 @@ public class MainActivity extends Activity {
                 });
             }
 
+            // Fullscreen video (tombol fullscreen YouTube dsb): tanpa ini
+            // diklik nggak ngefek. Tampilkan custom view fullscreen di atas
+            // segalanya; back / onHideCustomView mengembalikannya.
+            @Override
+            public void onShowCustomView(View view, CustomViewCallback cb) {
+                if (customView != null) { cb.onCustomViewHidden(); return; }
+                customView = view;
+                customViewCallback = cb;
+                webContainer.addView(view, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT));
+                view.bringToFront();
+            }
+
+            @Override
+            public void onHideCustomView() { hideCustomView(); }
+
             // Real console capture: every console.* + page error lands
             // here, including messages fired before page load.
             @Override
@@ -1472,7 +1492,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.13");
+                            oo.put("agent", "kancil-browser/1.14");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -2275,9 +2295,22 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (customView != null) { hideCustomView(); return; }
         WebView w = activeWeb();
         if (w.canGoBack()) w.goBack();
         else super.onBackPressed();
+    }
+
+    /** Must run on the UI thread. */
+    private void hideCustomView() {
+        if (customView == null) return;
+        try { webContainer.removeView(customView); } catch (Exception ignored) {}
+        customView = null;
+        if (customViewCallback != null) {
+            try { customViewCallback.onCustomViewHidden(); }
+            catch (Exception ignored) {}
+            customViewCallback = null;
+        }
     }
 
     @Override
