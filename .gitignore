@@ -21,3 +21,15 @@ Thumbs.db
 # Secrets
 *.key
 ca.crt
+
+# Android build artifacts (build.sh output, never commit)
+android/*.apk
+android/*.idsig
+android/classes/
+android/dex/
+android/gen/
+android/compiled_res/
+android/*.txt
+android/*.log
+android/debug.keystore
+android/app-*.apk
