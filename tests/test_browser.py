@@ -2245,6 +2245,21 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(self.PNG)))
             self.end_headers()
             self.wfile.write(self.PNG)
+        elif p == "/screenshot/element":
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(self.PNG)))
+            self.end_headers()
+            self.wfile.write(self.PNG)
+        elif p == "/videos":
+            self._json({"ok": True, "videos": [
+                {"index": 0, "src": "https://cdn.example/v.mp4",
+                 "duration": 120.5, "currentTime": 0,
+                 "paused": True, "width": 1280, "height": 720}]})
+        elif p == "/downloads":
+            self._json({"ok": True, "downloads": [
+                {"t": 1, "url": "https://example.com/f.zip",
+                 "name": "f.zip", "id": 42}]})
         elif p == "/console":
             self._json({"ok": True, "logs": [
                 {"t": 123, "level": "log", "text": "hello console"},
@@ -2306,6 +2321,15 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
             self._json({"ok": True})
         elif p == "/console/clear":
             self._json({"ok": True})
+        elif p == "/upload":
+            self._json({"ok": True, "path": body.get("path"),
+                        "hint": "click a file input next"})
+        elif p == "/download":
+            self._json({"ok": True, "id": 42})
+        elif p == "/form/fill":
+            self._json({"ok": True,
+                        "filled": list(body.get("fields", {}).keys()),
+                        "missing": []})
         elif p == "/blocklist":
             self._json({"ok": True,
                         "patterns": len(body.get("patterns", []))})
@@ -2442,8 +2466,9 @@ class WebViewEngineTest(unittest.TestCase):
         r = self.eng.screenshot(full=True)
         self.assertTrue(r["success"], r)
         self.assertTrue(r["full"])
-        self.assertFalse(
-            self.eng.screenshot(selector="#b1")["success"])
+        r = self.eng.screenshot(selector="#b1")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["selector"], "#b1")
 
     def test_console_capture(self):
         r = self.eng.console()
@@ -2462,15 +2487,55 @@ class WebViewEngineTest(unittest.TestCase):
         self.assertIn("ads.example", r["patterns"])
         self.assertTrue(self.eng.block_clear()["success"])
 
+    def test_videos(self):
+        r = self.eng.videos()
+        self.assertTrue(r["success"], r)
+        self.assertEqual(len(r["videos"]), 1)
+        self.assertEqual(r["videos"][0]["src"],
+                         "https://cdn.example/v.mp4")
+        self.assertEqual(r["videos"][0]["width"], 1280)
+
+    def test_fill_form(self):
+        r = self.eng.fill_form(0, {"username": "u", "password": "p"})
+        self.assertTrue(r["success"], r)
+        self.assertIn("username", r["filled"])
+        r = self.eng.fill_form(99, {"a": "b"})
+        self.assertFalse(r["success"])
+        r = self.eng.fill_form(0, {"f": "@/nonexistent-xyz"})
+        self.assertFalse(r["success"])
+        self.assertTrue(self.eng.submit_form(0)["success"])
+
+    def test_upload_download(self):
+        r = self.eng.upload("/nonexistent-xyz")
+        self.assertFalse(r["success"])
+        import tempfile
+        with tempfile.NamedTemporaryFile(
+                suffix=".txt", delete=False) as f:
+            f.write(b"x")
+            p = f.name
+        try:
+            r = self.eng.upload(p)
+            self.assertTrue(r["success"], r)
+            self.assertEqual(r["path"], p)
+        finally:
+            import os
+            os.unlink(p)
+        r = self.eng.download("https://example.com/f.zip")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["id"], 42)
+        dls = self.eng.download_list()
+        self.assertEqual(dls[0]["name"], "f.zip")
+
     def test_capabilities_honest(self):
         c = self.eng.capabilities
         self.assertTrue(c["xpath"])
         self.assertTrue(c["css_selectors"])
         self.assertTrue(c["console_capture"])
         self.assertTrue(c["network_interception"])
+        self.assertTrue(c["forms"])
+        self.assertTrue(c["downloads"])
         self.assertFalse(c["indexeddb"])
         self.assertFalse(c["computed_style"])
-        self.assertFalse(c["forms"])
 
     def test_forms(self):
         forms = self.eng.forms()

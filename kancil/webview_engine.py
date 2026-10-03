@@ -23,8 +23,8 @@ from . import session as session_mod
 class WebViewEngine:
     name = "webview"
     # Honest capabilities: only what the APK agent actually implements.
-    # (xpath works via document.evaluate; indexeddb/computed_style/forms/
-    #  HAR/fill_form are NOT implemented -> False/raises.
+    # (xpath works via document.evaluate; indexeddb/computed_style/HAR
+    #  are NOT implemented -> False/raises.
     #  network_interception = pattern-based request *blocking* via the
     #  agent blocklist (no response mocking like CDP Fetch).)
     capabilities = {
@@ -38,8 +38,8 @@ class WebViewEngine:
         "console_capture": True,
         "video": True,
         "cookies": True,
-        "forms": False,
-        "downloads": False,
+        "forms": True,
+        "downloads": True,
         "xpath": True,
         "css_selectors": True,
     }
@@ -590,17 +590,16 @@ class WebViewEngine:
     # ---------- screenshot / cookies / network ----------
 
     def screenshot(self, path=None, full=False, selector=None):
-        # Element screenshots are NOT supported: fail loudly instead of
-        # silently ignoring the flag. Full-page uses the APK's native
-        # scroll-and-stitch capture.
-        if selector:
-            return {"success": False,
-                    "errors": ["element screenshot not supported "
-                               "by the webview agent (window/full only)"]}
+        # Element screenshots via the agent's native rect+scroll+crop.
         path = path or os.path.join(session_mod.SCREEN_DIR,
                                     "shot-%d.png" % int(time.time()))
         try:
-            r = self._req("GET", "/screenshot/full" if full else "/screenshot")
+            if selector:
+                r = self._req("GET", "/screenshot/element?selector="
+                              + urllib.parse.quote(selector, safe=""))
+            else:
+                r = self._req("GET",
+                              "/screenshot/full" if full else "/screenshot")
             raw = r.get("raw", b"")
             if not raw or raw[:8] != b"\x89PNG\r\n\x1a\n":
                 return {"success": False,
@@ -608,7 +607,8 @@ class WebViewEngine:
             with open(path, "wb") as f:
                 f.write(raw)
             return {"success": True, "supported": True, "path": path,
-                    "bytes": len(raw), "full": bool(full)}
+                    "bytes": len(raw), "full": bool(full),
+                    "selector": selector}
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
@@ -671,8 +671,102 @@ class WebViewEngine:
                                    for x in fm["inputs"] if x["name"]]})
         return out
 
-    def _origin(self):
-        return ""
+    def fill_form(self, fidx, values=None, auto=False, profile=None):
+        """Fill form #fidx (0-based). values: {field_name: value}.
+        Values starting with '@' + existing path = file upload."""
+        try:
+            forms = self.forms()
+            if not (0 <= fidx < len(forms)):
+                return {"success": False, "errors": ["no such form"]}
+            fm = forms[fidx]
+            vals = dict(values or {})
+            if auto and profile:
+                for fld in fm.get("fields", []):
+                    if fld["name"] not in vals:
+                        key = engines.guess_field(
+                            fld["name"], fld.get("label", ""),
+                            fld["type"])
+                        if key and key in profile:
+                            vals[fld["name"]] = profile[key]
+            # validate @file paths early (honest failure, like static)
+            for k, v in list(vals.items()):
+                if isinstance(v, str) and v.startswith("@") \
+                        and not os.path.exists(v[1:]):
+                    return {"success": False, "errors": [
+                        "upload file not found: %s" % v[1:]]}
+            r = self._post("/form/fill",
+                           {"form": fidx, "fields": vals, "submit": False})
+            if not isinstance(r, dict) or not r.get("ok"):
+                return {"success": False,
+                        "errors": [str(r.get("error") if isinstance(
+                            r, dict) else r)[:200]]}
+            out = {"success": True, "filled": r.get("filled", []),
+                   "missing": r.get("missing", [])}
+            if r.get("error"):
+                out["errors"] = [r["error"]]
+            return out
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def submit_form(self, fidx):
+        try:
+            r = self._post("/form/fill",
+                           {"form": fidx, "fields": {}, "submit": True})
+            if isinstance(r, dict) and r.get("ok", True):
+                return {"success": True, "submitted": True}
+            return {"success": False, "errors": [str(r)[:200]]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def videos(self):
+        """List <video> elements: src, duration, size, playback state."""
+        try:
+            r = self._get("/videos")
+            vids = r.get("videos", []) if isinstance(r, dict) else []
+            return {"success": True,
+                    "videos": vids if isinstance(vids, list) else []}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:150]]}
+
+    def upload(self, path):
+        """Stage a file for the next file-chooser (input[type=file] click)."""
+        try:
+            if not os.path.exists(path):
+                return {"success": False,
+                        "errors": ["file not found: %s" % path]}
+            r = self._post("/upload", {"path": path})
+            if isinstance(r, dict) and r.get("ok"):
+                return {"success": True, "path": path,
+                        "hint": r.get("hint", "")}
+            return {"success": False, "errors": [str(r)[:200]]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def download(self, url, path=None):
+        """Enqueue a download via the app's DownloadManager."""
+        try:
+            r = self._post("/download", {"url": url})
+            if isinstance(r, dict) and r.get("ok"):
+                return {"success": True, "id": r.get("id"), "url": url}
+            return {"success": False, "errors": [str(r)[:200]]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def download_list(self):
+        try:
+            r = self._get("/downloads")
+            dls = r.get("downloads", []) if isinstance(r, dict) else []
+            return dls if isinstance(dls, list) else []
+        except Exception:
+            return []
+
+    def download_pause(self, did):
+        return {"success": False,
+                "errors": ["pause not supported by the webview agent"]}
+
+    def download_resume(self, did):
+        return {"success": False,
+                "errors": ["resume not supported by the webview agent"]}
 
     def storage(self, kind="local"):
         r = self.evaluate(
@@ -711,24 +805,6 @@ class WebViewEngine:
         return {"success": False, "errors": r.get("errors")}
 
     # ---------- unsupported (honest) ----------
-
-    def fill_form(self, fidx, values=None, auto=False, profile=None):
-        raise EngineError("fill_form not implemented for webview engine")
-
-    def submit_form(self, fidx):
-        raise EngineError("submit_form not implemented for webview engine")
-
-    def download(self, *a, **kw):
-        raise EngineError("downloads not supported by the webview agent v1")
-
-    def download_list(self):
-        return []
-
-    def download_pause(self, *a):
-        raise EngineError("downloads not supported by the webview agent v1")
-
-    def download_resume(self, *a):
-        raise EngineError("downloads not supported by the webview agent v1")
 
     def set_proxy(self, url):
         raise EngineError("proxy must be set in the app (not supported v1)")

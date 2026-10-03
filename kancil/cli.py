@@ -254,6 +254,9 @@ def build_parser():
     dl.add_argument("url")
     dl.add_argument("--out", default=None)
     SP("downloads", help="download manager")
+    up = SP("upload", help="stage file for next file-chooser (webview engine)")
+    up.add_argument("path")
+    SP("videos", help="list <video> elements (webview engine)")
     dp = SP("dlpause", help="pause download")
     dp.add_argument("id", type=int)
     dr = SP("dlresume", help="resume download")
@@ -615,6 +618,10 @@ def dispatch(b, args):
         return b.download(args.url, args.out)
     if c == "downloads":
         return b.downloads()
+    if c == "upload":
+        return b.upload(args.path)
+    if c == "videos":
+        return b.videos()
     if c == "dlpause":
         return b.download_pause(args.id)
     if c == "dlresume":

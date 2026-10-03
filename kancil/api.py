@@ -772,6 +772,20 @@ class Kancil:
     def download_resume(self, did):
         return self._wrap(self.engine.download_resume(did))
 
+    def videos(self):
+        fn = getattr(self.engine, "videos", None)
+        if not fn:
+            return fail("video listing needs the webview engine",
+                        supported=False)
+        return self._wrap(fn())
+
+    def upload(self, path):
+        fn = getattr(self.engine, "upload", None)
+        if not fn:
+            return fail("agent upload needs the webview engine",
+                        supported=False)
+        return self._wrap(fn(path))
+
     # ---------- perf ----------
     def perf(self, url=None):
         return self._wrap(self.engine.perf(url))
@@ -995,7 +1009,7 @@ class Kancil:
                     "statusText": "", "httpVersion": "HTTP/1.1", "cookies": res_cookies,
                     "headers": [{"name": k, "value": str(v)} for k, v in res_hdrs.items()],
                     "content": {"size": e.get("response_size", e.get("size", 0)),
-                                "mimeType": e.get("ctype", "")},
+                                "mimeType": e.get("ctype") or e.get("mime", "")},
                     "redirectURL": "", "headersSize": -1,
                     "bodySize": e.get("response_size", e.get("size", 0)),
                 },
