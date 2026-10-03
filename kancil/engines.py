@@ -18,9 +18,8 @@ import time
 import urllib.parse
 import urllib.request
 
-from .dom import (build_dom, extract_title, render_text, select, select_one,
-                  smart_resolve, xpath, a11y_items, inspect_element,
-                  generate_css, Node)
+from .dom import (build_dom, extract_title, render_text, select,
+                  smart_resolve, a11y_items, Node)
 from . import httpcache
 
 

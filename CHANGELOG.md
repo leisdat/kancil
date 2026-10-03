@@ -383,3 +383,11 @@ Playwright session via `storage_state`, Agent Tool Interface
 - Engine webview: `switch_tab` verifikasi via /status setelah activate — ID basi (app di-recreate OS) kini gagal jujur, bukan "sukses" palsu.
 - APK: `restoreTabs()` pertahankan ID tab asli (sebelumnya tiap recreate kasih ID baru → ID agent basi). `Tab.id` tidak final lagi.
 - 17 unit tests WebView (4 baru: forms, storage null, switch verify, extract article).
+
+## Unreleased (audit menyeluruh)
+- Audit: semua `engine.X()` di api.py ter-cover di 3 engine (static: 4 guarded, webview: lengkap, playwright: inherit static).
+- Engine webview: `_el_err()` — JS error (`ERR:`) dan selector invalid kini gagal jujur di click/type/clear/select/hover/focus/scroll (sebelumnya sukses palsu).
+- Engine webview: `wait`/`resolve` tahan `int("null")`; `storage_get` balikin None (bukan string "null") untuk key kosong.
+- APK: `findTab` di `/tabs/activate` pindah ke UI thread (hindari ConcurrentModificationException).
+- Bersih-bersih: 11 unused import dihapus (api, cli, engines, devtools, pw_engine, proxy_server).
+- 169 tests hijau (19 webview).

@@ -11,7 +11,6 @@ import time
 
 from . import engines
 from . import session as session_mod
-from .dom import inspect_element
 
 
 def _browser_env():

@@ -269,6 +269,20 @@ class WebViewEngine:
             return False
         return not re.search(r'[#.\[\]>+~:()@=/"\'*|]', q)
 
+    def _el_err(self, r, query):
+        """Error message if an element action failed, else None.
+
+        The APK returns 'not-found' for missing elements and 'ERR:...'
+        for JS exceptions (e.g. invalid selector syntax) — both must be
+        failures, never silent success.
+        """
+        res = r.get("result") if isinstance(r, dict) else None
+        if res == "not-found":
+            return "no element matches %r" % (query,)
+        if isinstance(res, str) and res.startswith("ERR:"):
+            return "JS error for %r: %s" % (query, res[4:100])
+        return None
+
     def _target_js(self, query):
         """JS expression evaluating to the target element (or null).
 
@@ -323,7 +337,10 @@ class WebViewEngine:
         try:
             js, method = self._count_js(query)
             r = self._post("/js", {"expr": js})
-            n = int(r.get("result") or 0)
+            try:
+                n = int(r.get("result") or 0)
+            except (TypeError, ValueError):
+                n = 0
             if n == 0:
                 return {"success": False,
                         "errors": ["no element matches %r" % query]}
@@ -340,9 +357,9 @@ class WebViewEngine:
                 "if(!el) return 'not-found';"
                 "el.scrollIntoView({block:'center'});el.click();"
                 "return 'clicked'})()" % self._target_js(query)})
-            if r.get("result") == "not-found":
-                return {"success": False,
-                        "errors": ["no element matches %r" % query]}
+            err = self._el_err(r, query)
+            if err:
+                return {"success": False, "errors": [err]}
             self._invalidate()
             return {"success": True, "selector": query}
         except Exception as e:
@@ -369,9 +386,9 @@ class WebViewEngine:
                 "el.dispatchEvent(new Event('change',{bubbles:true}));"
                 "return 'typed'})()"
                 % (self._target_js(query), json.dumps(text or ""))})
-            if r.get("result") == "not-found":
-                return {"success": False,
-                        "errors": ["no element matches %r" % query]}
+            err = self._el_err(r, query)
+            if err:
+                return {"success": False, "errors": [err]}
             self._invalidate()
             return {"success": True}
         except Exception as e:
@@ -391,9 +408,9 @@ class WebViewEngine:
                 "}catch(e){el.value='';}"
                 "el.dispatchEvent(new Event('input',{bubbles:true}));"
                 "return 'cleared'})()" % self._target_js(query)})
-            if r.get("result") == "not-found":
-                return {"success": False,
-                        "errors": ["no element matches %r" % query]}
+            err = self._el_err(r, query)
+            if err:
+                return {"success": False, "errors": [err]}
             self._invalidate()
             return {"success": True}
         except Exception as e:
@@ -411,9 +428,9 @@ class WebViewEngine:
                 "return ok?'selected':'no-match'})()"
                 % (self._target_js(query), json.dumps(choice))})
             res = r.get("result")
-            if res == "not-found":
-                return {"success": False,
-                        "errors": ["no element matches %r" % query]}
+            err = self._el_err(r, query)
+            if err:
+                return {"success": False, "errors": [err]}
             if res != "selected":
                 return {"success": False,
                         "errors": ["no option %r" % choice]}
@@ -438,9 +455,9 @@ class WebViewEngine:
                 "return 'ok'})()"
                 % (self._target_js(query),
                    "true" if val else "false")})
-            if r.get("result") == "not-found":
-                return {"success": False,
-                        "errors": ["no element matches %r" % query]}
+            err = self._el_err(r, query)
+            if err:
+                return {"success": False, "errors": [err]}
             self._invalidate()
             return {"success": True}
         except Exception as e:
@@ -456,9 +473,9 @@ class WebViewEngine:
                 "el.dispatchEvent(new MouseEvent(t,{bubbles:true,"
                 "cancelable:true,view:window}));});"
                 "return 'hovered'})()" % self._target_js(query)})
-            if r.get("result") == "not-found":
-                return {"success": False,
-                        "errors": ["no element matches %r" % query]}
+            err = self._el_err(r, query)
+            if err:
+                return {"success": False, "errors": [err]}
             return {"success": True}
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
@@ -469,9 +486,9 @@ class WebViewEngine:
                 "(function(){var el=%s;"
                 "if(!el) return 'not-found';el.focus();return 'ok'})()"
                 % self._target_js(query)})
-            if r.get("result") == "not-found":
-                return {"success": False,
-                        "errors": ["no element matches %r" % query]}
+            err = self._el_err(r, query)
+            if err:
+                return {"success": False, "errors": [err]}
             return {"success": True}
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
@@ -492,9 +509,9 @@ class WebViewEngine:
                         "if(!el)return 'not-found';"
                         "el.scrollIntoView({block:'center'});"
                         "return 'ok'})()" % self._target_js(str(target))})
-                    if r.get("result") == "not-found":
-                        return {"success": False,
-                                "errors": ["no element matches %r" % target]}
+                    err = self._el_err(r, target)
+                    if err:
+                        return {"success": False, "errors": [err]}
                     self._invalidate()
                     return {"success": True}
             self._post("/js", {"expr": js})
@@ -532,7 +549,11 @@ class WebViewEngine:
                 while time.time() < end:
                     js, _m = self._count_js(selector)
                     r = self._post("/js", {"expr": js})
-                    if int(r.get("result") or 0) > 0:
+                    try:
+                        n = int(r.get("result") or 0)
+                    except (TypeError, ValueError):
+                        n = 0  # JS error -> treat as no match, keep polling
+                    if n > 0:
                         return {"success": True, "selector": selector}
                     time.sleep(0.5)
                 return {"success": False,
@@ -649,7 +670,11 @@ class WebViewEngine:
 
     def storage_get(self, key, kind="local"):
         r = self.evaluate("%sStorage.getItem(%s)" % (kind, json.dumps(key)))
-        return r.get("result") if r.get("success") else None
+        if not r.get("success"):
+            return None
+        v = r.get("result")
+        # missing key -> JS null -> the string "null"
+        return None if v in (None, "null") else v
 
     def storage_set(self, key, value, kind="local"):
         r = self.evaluate("%sStorage.setItem(%s,%s)"

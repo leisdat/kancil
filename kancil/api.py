@@ -10,8 +10,8 @@ import time
 
 from . import engines
 from . import session as session_mod
-from .devtools import scrape_items, scrape_auto, extract_reader
-from .dom import inspect_element, select, xpath, smart_resolve, generate_css, generate_xpath
+from .devtools import extract_reader
+from .dom import inspect_element, select, xpath, generate_css, generate_xpath
 
 
 def ok(**data):

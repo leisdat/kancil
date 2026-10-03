@@ -6,7 +6,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from .dom import select, select_one, Node
+from .dom import select, select_one
 
 
 def parse_field_spec(spec):

@@ -620,7 +620,6 @@ def dispatch(b, args):
     if c == "dlresume":
         return b.download_resume(args.id)
     if c == "crawl":
-        from .devtools import scrape_items  # noqa
         return _crawl_cli(b, args)
     if c == "session":
         if args.action == "save":

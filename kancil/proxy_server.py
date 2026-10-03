@@ -26,7 +26,7 @@ import threading
 import time
 import urllib.parse as up
 
-from .agent_bridge import get_bridge, route_agent
+from .agent_bridge import route_agent
 
 HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate",
               "proxy-authorization", "te", "trailer", "transfer-encoding",

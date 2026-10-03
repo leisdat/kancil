@@ -2253,7 +2253,11 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
             self._json({"ok": True, "url": body.get("url")})
         elif p == "/js":
             expr = body.get("expr", "")
-            if "normalize-space" in expr:
+            if "[invalid" in expr:
+                # simulates a JS SyntaxError from the page
+                self._json({"ok": True,
+                            "result": "ERR:SyntaxError: invalid selector"})
+            elif "normalize-space" in expr:
                 # XPath visible-text fallback
                 self._json({"ok": True,
                             "result": "0" if "nope" in expr else "1"})
@@ -2463,3 +2467,14 @@ class WebViewEngineTest(unittest.TestCase):
         self.assertTrue(r["success"], r)
         self.assertIn("title", r["article"])
         self.assertIn("text", r["article"])
+
+    def test_invalid_selector_js_error(self):
+        # invalid CSS must fail honestly, never silent success
+        r = self.eng.click("[invalid")
+        self.assertFalse(r["success"])
+        self.assertIn("JS error", r["errors"][0])
+        r = self.eng.resolve("[invalid")
+        self.assertFalse(r["success"])
+
+    def test_storage_get_missing(self):
+        self.assertIsNone(self.eng.storage_get("nope", "local"))

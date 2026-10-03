@@ -1055,7 +1055,9 @@ public class MainActivity extends Activity {
                     catch (Exception e) {
                         return AgentServer.Response.err(400, "missing id");
                     }
-                    if (findTab(id) == null)
+                    // findTab touches the tabs list: must run on UI thread
+                    boolean exists = uiGet(() -> findTab(id) != null);
+                    if (!exists)
                         return AgentServer.Response.err(404, "no such tab " + id);
                     activateTab(id);
                     agentNote("tab #" + id);
