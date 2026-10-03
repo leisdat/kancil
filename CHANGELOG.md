@@ -49,7 +49,9 @@ Daemon mode: satu proses persistent, nol biaya startup per command.
 
 ## 3.12.0 (2026-10-02)
 
-Network log setara DevTools: query params + cookies per request.
+Network log ala DevTools: query params + cookies per request.
+(Jujur: ini request log + header, tanpa response status/body — bukan
+DevTools penuh.)
 
 ### Added
 - Setiap entri netlog (static + playwright) sekarang bawa `query`

@@ -143,6 +143,26 @@ kancil/                 # pip project root
   README.md / README.id.md / CHANGELOG.md
 ```
 
+## Troubleshooting (webview engine)
+
+**App frozen / agent timeout (MIUI, screen off).** Enable "Keep agent alive"
+in Settings (default ON) — a foreground service + notification keeps task
+killers away. If it still times out, wake it manually:
+`am start -n com.kancil.browser/.MainActivity`.
+
+**Stale tab IDs.** Every `kancil ...` is a new process that re-reads
+`/status`; if Android recreates the app in the background, tab IDs can
+shift. For a stable session use `kancil --engine webview shell` (one
+process) or `kancil daemon start`.
+
+**Per-app VPN: WebView shows a different IP than Termux.** Per-app VPNs only
+tunnel selected apps — add Kancil Browser to the VPN allowlist. Alternative:
+`kancil serve-proxy --mitm` on Termux (already VPN-tunneled) and route the
+phone's traffic through it.
+
+**Network log is request + headers only** (no response status/body — that
+needs full CDP/MITM). HAR export works from the existing log.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

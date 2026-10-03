@@ -77,7 +77,7 @@ kancil/                        # project root
 |----------------------|--------------------|--------------|-----------|
 | Buka URL, tab, history | ✅ | ✅ | ✅ (multi-tab) |
 | DOM, CSS, XPath      | ✅ | ✅ | ✅ |
-| Klik link / submit form (+upload file) | ✅ | ✅ | ✅ (klik/ketik) |
+| Klik link / submit form (+upload file) | ✅ | ✅ | ✅ (klik/ketik/fill) |
 | Smart resolve `click "Login"` | ✅ | ✅ | ✅ |
 | Cookies              | ✅ | ✅ | ✅ (punya app) |
 | Network log + header, HAR export | ✅ | ✅ (+ interception) | ✅ (log saja) |
@@ -95,3 +95,34 @@ Engine `webview` nyambung ke aplikasi **Kancil Browser** (folder `android/`,
 APK ~73 KB) yang jalan di HP yang sama — Chromium beneran (System WebView).
 Login/captcha cukup sekali di app, agent di Termux pakai session-nya terus:
 `kancil open --engine webview https://example.com`.
+
+> **Stabilitas sesi:** tiap `kancil ...` = proses baru yang baca ulang
+> `/status`. Kalau Android me-recreate app di background, ID tab bisa
+> bergeser — untuk sesi stabil pakai `kancil --engine webview shell`
+> (satu proses) atau `kancil daemon start`.
+
+## Troubleshooting (engine webview)
+
+**App di-freeze / agent timeout (MIUI, layar mati).**
+Aktifkan "Jaga agent tetap hidup" di Pengaturan (default ON) — foreground
+service + notifikasi bikin task killer nggak berani kill. Kalau masih
+timeout, bangunkan manual:
+`am start -n com.kancil.browser/.MainActivity`.
+
+**Tab ID basi / snapshot baca tab salah.**
+`switch_tab` selalu verifikasi via `/status` dan gagal jujur kalau ID basi —
+baca ulang `kancil tabs` dulu, atau pakai `shell`/`daemon` (satu proses).
+
+**VPN per-app: IP WebView beda dengan Termux.**
+VPN per-app cuma nunnel app yang dipilih — masukkan Kancil Browser ke
+allowlist VPN. Alternatif: `kancil serve-proxy --mitm` di Termux (yang sudah
+ke-VPN), lalu arahkan traffic HP lewat proxy itu.
+
+**Network log: request + header saja.**
+Webview mencatat method/URL/header per request (`kancil network`), tanpa
+response status/body — itu butuh CDP/MITM penuh. HAR export tersedia dari
+log yang ada.
+
+**`type()` di input framework modern (React/Vue).**
+Sudah pakai native value setter + event `input`/`change`. Kalau masih nggak
+nempel, pakai `kancil form fill` atau cek `kancil console` untuk error JS.
