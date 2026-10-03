@@ -1039,6 +1039,10 @@ class Kancil:
 
     def har_export(self, path="network.har", redact=True,
                    redact_cookie=True, redact_authorization=True, redact_token=True):
+        """Export netlog as HAR. Honest limitation: the webview engine's
+        netlog records request (method/url/timing/headers) but NOT response
+        status — webview HAR entries always show status 0. Static/playwright
+        engines record real statuses."""
         import datetime
         import urllib.parse as up
         if not redact:

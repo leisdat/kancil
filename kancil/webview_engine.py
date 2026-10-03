@@ -1144,9 +1144,6 @@ class WebViewEngine:
     def perf(self, url=None):
         raise EngineError("perf not supported by the webview agent v1")
 
-    def har_export(self, *a, **kw):
-        raise EngineError("har_export not supported by the webview agent v1")
-
     def request(self, *a, **kw):
         raise EngineError("raw request() is static-engine only")
 
