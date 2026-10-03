@@ -363,3 +363,15 @@ Playwright session via `storage_state`, Agent Tool Interface
 - Engine: `network()` filter `type_`/`status` beneran dipakai.
 - Capabilities jujur: `indexeddb`/`computed_style`/`forms`/`console_capture` = False.
 - 13 unit tests WebView (6 baru: xpath, smart text, wait text, hover/scroll, screenshot flags, capabilities).
+
+## Unreleased (UI review P0+P1)
+- APK UI: status agent ramah ("● Agent aktif" / "○ Agent terputus", dot warna, contentDescription) — port cuma di dialog Agent.
+- APK UI: error page beneran (pesan + URL + [Coba lagi] [Kembali]) ganti toast.
+- APK UI: vector drawable sendiri (back/forward/menu/close), tombol tab "▣ N" + label aksesibilitas.
+- APK UI: dark mode native (Theme.Kancil.Dark, recreate saat toggle) — toolbar/dialog ikut gelap.
+- APK UI: tab switcher kartu (judul+URL+●/○, tombol ✕ per tab, + tab baru).
+- APK UI: dialog "Agent API" (status, tab aktif, contoh command + salin, 10 log terakhir).
+- APK UI: toast agent berwarna (info/ok/warn/error) + log persisten 50 entri.
+- APK UI: navigate() kenali localhost/IP:port sebagai URL (http://).
+- APK UI: WindowInsets — toolbar aman dari notch/status bar.
+- APK: 73 KB (naik 6 KB dari 67 KB).

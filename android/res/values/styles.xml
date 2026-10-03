@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Kancil" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FFFFFF</item>
+        <item name="android:colorBackground">#FFFFFF</item>
+    </style>
+    <style name="Theme.Kancil.Dark" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#202124</item>
+        <item name="android:colorBackground">#202124</item>
+    </style>
+</resources>

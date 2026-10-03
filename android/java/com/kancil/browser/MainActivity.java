@@ -28,6 +28,7 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.ProgressBar;
@@ -72,6 +73,7 @@ public class MainActivity extends Activity {
     private Tab active;
     private int tabSeq = 0;
     private AgentServer server;
+    private boolean agentUp = false;
     private SharedPreferences prefs;
 
     // search engines: key -> {label, home, search url prefix}
@@ -100,7 +102,12 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle b) {
+        // Theme must be set before super.onCreate (base context is attached).
+        SharedPreferences p0 = getSharedPreferences("kancil", MODE_PRIVATE);
+        setTheme(p0.getBoolean("dark", false)
+                ? R.style.Theme_Kancil_Dark : R.style.Theme_Kancil);
         super.onCreate(b);
+        prefs = p0;
         setContentView(R.layout.activity_main);
         webContainer = findViewById(R.id.web_container);
         urlBar = findViewById(R.id.url_bar);
@@ -108,12 +115,30 @@ public class MainActivity extends Activity {
         progressBar = findViewById(R.id.progress);
         agentStatus = findViewById(R.id.agent_status);
         agentToast = findViewById(R.id.agent_toast);
-        prefs = getSharedPreferences("kancil", MODE_PRIVATE);
-        getWindow().setStatusBarColor(0xFF0E6B2E);
+        applyUiTheme();
+
+        // Safe-area: keep toolbar below status bar / notch.
+        final View toolbar = findViewById(R.id.toolbar);
+        final int pt = toolbar.getPaddingTop(), pb = toolbar.getPaddingBottom(),
+                  pl = toolbar.getPaddingLeft(), pr = toolbar.getPaddingRight();
+        toolbar.setOnApplyWindowInsetsListener((v, in) -> {
+            v.setPadding(pl, pt + in.getSystemWindowInsetTop(), pr, pb);
+            return in;
+        });
 
         findViewById(R.id.btn_back).setOnClickListener(v -> goBack());
         findViewById(R.id.btn_fwd).setOnClickListener(v -> goForward());
         findViewById(R.id.btn_menu).setOnClickListener(v -> showMenu(v));
+        findViewById(R.id.btn_retry).setOnClickListener(v -> {
+            findViewById(R.id.error_view).setVisibility(View.GONE);
+            activeWeb().reload();
+        });
+        findViewById(R.id.btn_error_back).setOnClickListener(v -> {
+            findViewById(R.id.error_view).setVisibility(View.GONE);
+            WebView w = activeWeb();
+            if (w.canGoBack()) w.goBack();
+            else w.loadUrl(homeUrl());
+        });
         tabCountBtn.setOnClickListener(v -> showTabSwitcher());
         urlBar.setOnEditorActionListener((v, actionId, ev) -> {
             if (actionId == EditorInfo.IME_ACTION_GO) {
@@ -124,6 +149,7 @@ public class MainActivity extends Activity {
         });
 
         startAgentServer();
+        setAgentStatus(serverUp());
         if (!restoreTabs()) {
             newTab(homeUrl(), false);
         }
@@ -367,7 +393,39 @@ public class MainActivity extends Activity {
     }
 
     private void updateTabCount() {
-        tabCountBtn.setText(String.valueOf(tabs.size()));
+        tabCountBtn.setText("▣ " + tabs.size());
+        tabCountBtn.setContentDescription(tabs.size() + " tab");
+    }
+
+    private int dp(int v) {
+        return (int) (v * getResources().getDisplayMetrics().density);
+    }
+
+    private void applyUiTheme() {
+        boolean dk = dark();
+        urlBar.setBackgroundResource(
+                dk ? R.drawable.url_bg_dark : R.drawable.url_bg);
+        urlBar.setTextColor(dk ? 0xFFE8EAED : 0xFF202124);
+        urlBar.setHintTextColor(dk ? 0xFF9AA0A6 : 0xFF80868B);
+        int tint = dk ? 0xFFE8EAED : 0xFF5F6368;
+        ((ImageButton) findViewById(R.id.btn_back)).setColorFilter(tint);
+        ((ImageButton) findViewById(R.id.btn_fwd)).setColorFilter(tint);
+        ((ImageButton) findViewById(R.id.btn_menu)).setColorFilter(tint);
+        tabCountBtn.setTextColor(dk ? 0xFF81C995 : 0xFF137333);
+        getWindow().setStatusBarColor(dk ? 0xFF202124 : 0xFF0E6B2E);
+    }
+
+    private void setAgentStatus(final boolean up) {
+        ui.post(() -> {
+            boolean dk = dark();
+            agentStatus.setText(up ? "● Agent aktif" : "○ Agent terputus");
+            agentStatus.setTextColor(up
+                    ? (dk ? 0xFF81C995 : 0xFF137333) : 0xFFB3261E);
+            findViewById(R.id.agent_dot).setBackgroundColor(
+                    up ? 0xFF1EA446 : 0xFFB3261E);
+            agentStatus.setContentDescription(up
+                    ? "Agent aktif di port 8080" : "Agent terputus");
+        });
     }
 
     private void showSettings() {
@@ -423,6 +481,7 @@ public class MainActivity extends Activity {
                 .setTitle("Pengaturan")
                 .setView(sv)
                 .setPositiveButton("OK", (d, which) -> {
+                    boolean darkChanged = cbDark.isChecked() != dark();
                     boolean needReload = cbData.isChecked() != dataSaver()
                             || cbDesk.isChecked() != desktop();
                     prefs.edit()
@@ -432,6 +491,10 @@ public class MainActivity extends Activity {
                             .putBoolean("desktop", cbDesk.isChecked())
                             .putBoolean("dark", cbDark.isChecked())
                             .apply();
+                    if (darkChanged) {
+                        recreate(); // theme native diganti
+                        return;
+                    }
                     ui.post(() -> {
                         for (Tab t : new ArrayList<>(tabs)) applyToggles(t);
                         setDarkAll(dark());
@@ -546,6 +609,7 @@ public class MainActivity extends Activity {
         pm.getMenu().add("Reader mode");
         pm.getMenu().add("Cari di halaman");
         pm.getMenu().add("Download");
+        pm.getMenu().add("Agent API");
         pm.getMenu().add("Pengaturan");
         pm.setOnMenuItemClickListener(item -> {
             String t = String.valueOf(item.getTitle());
@@ -571,6 +635,9 @@ public class MainActivity extends Activity {
                                 Toast.LENGTH_SHORT).show();
                     }
                     break;
+                case "Agent API":
+                    showAgentDialog();
+                    break;
                 case "Pengaturan":
                     showSettings();
                     break;
@@ -580,28 +647,143 @@ public class MainActivity extends Activity {
         pm.show();
     }
 
+    private void showAgentDialog() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(16);
+        root.setPadding(pad, dp(8), pad, dp(8));
+
+        TextView st = new TextView(this);
+        boolean up = serverUp();
+        st.setText(up ? "● Agent aktif — 127.0.0.1:8080"
+                     : "○ Agent terputus");
+        st.setTextSize(15);
+        root.addView(st);
+
+        TextView tab = new TextView(this);
+        String u = null;
+        try { u = activeWeb().getUrl(); } catch (Exception ignored) {}
+        tab.setText("Tab #" + (active == null ? "-" : active.id) + ": "
+                + (u == null ? "" : u));
+        tab.setTextSize(13);
+        root.addView(tab);
+
+        TextView lbl = new TextView(this);
+        lbl.setText("\nDari Termux:");
+        root.addView(lbl);
+        final String cmd = "kancil --engine webview open https://example.com";
+        TextView cmdv = new TextView(this);
+        cmdv.setText(cmd);
+        cmdv.setTypeface(android.graphics.Typeface.MONOSPACE);
+        cmdv.setTextIsSelectable(true);
+        cmdv.setTextSize(13);
+        root.addView(cmdv);
+        Button copy = new Button(this);
+        copy.setText("Salin perintah");
+        copy.setOnClickListener(v -> {
+            android.content.ClipboardManager cm =
+                    (android.content.ClipboardManager)
+                            getSystemService(CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(android.content.ClipData.newPlainText(
+                    "kancil", cmd));
+            Toast.makeText(this, "Disalin", Toast.LENGTH_SHORT).show();
+        });
+        root.addView(copy);
+
+        TextView logLbl = new TextView(this);
+        logLbl.setText("\nLog agent:");
+        root.addView(logLbl);
+        TextView log = new TextView(this);
+        StringBuilder sb = new StringBuilder();
+        for (int i = Math.max(0, agentLogBuf.size() - 10);
+                i < agentLogBuf.size(); i++)
+            sb.append(agentLogBuf.get(i)).append("\n");
+        log.setText(sb.length() == 0 ? "(belum ada aktivitas)"
+                                     : sb.toString().trim());
+        log.setTypeface(android.graphics.Typeface.MONOSPACE);
+        log.setTextSize(11);
+        ScrollView sv = new ScrollView(this);
+        sv.addView(log);
+        sv.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(120)));
+        root.addView(sv);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Agent API")
+                .setView(root)
+                .setPositiveButton("Tutup", null)
+                .show();
+    }
+
+    private boolean serverUp() {
+        return agentUp;
+    }
+
     private void showTabSwitcher() {
         final List<Tab> copy = new ArrayList<>(tabs);
-        String[] names = new String[copy.size() + 1];
-        for (int i = 0; i < copy.size(); i++) {
-            Tab t = copy.get(i);
-            String label = t.title.isEmpty() ? (t.web.getUrl() != null
-                    ? t.web.getUrl() : "new tab") : t.title;
-            if (label.length() > 40) label = label.substring(0, 40) + "…";
-            names[i] = (t == active ? "● " : "○ ") + label;
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        final int pad = dp(12);
+        final AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("Tab (" + copy.size() + ")")
+                .setNegativeButton("Tutup", null)
+                .create();
+        for (final Tab t : copy) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            row.setPadding(pad, dp(10), pad, dp(10));
+
+            TextView tv = new TextView(this);
+            String title = t.title.isEmpty() ? "Tab baru" : t.title;
+            String url = t.web.getUrl();
+            if (title.length() > 36) title = title.substring(0, 36) + "…";
+            if (url != null && url.length() > 48)
+                url = url.substring(0, 48) + "…";
+            tv.setText((t == active ? "● " : "○ ") + title + "\n"
+                    + (url == null ? "" : url));
+            tv.setTextSize(14);
+            tv.setMaxLines(2);
+            tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+            tv.setLayoutParams(lp);
+
+            ImageButton x = new ImageButton(this);
+            x.setImageResource(R.drawable.ic_close);
+            x.setBackgroundColor(0x00000000);
+            x.setColorFilter(dark() ? 0xFFE8EAED : 0xFF5F6368);
+            x.setContentDescription("Tutup tab " + title);
+            LinearLayout.LayoutParams xlp = new LinearLayout.LayoutParams(
+                    dp(36), dp(36));
+            x.setLayoutParams(xlp);
+
+            row.addView(tv);
+            row.addView(x);
+            row.setOnClickListener(v -> {
+                dlg.dismiss();
+                activateTab(t.id);
+            });
+            x.setOnClickListener(v -> {
+                dlg.dismiss();
+                closeTabUi(t.id);
+            });
+            root.addView(row);
         }
-        names[copy.size()] = "＋ New tab";
-        new AlertDialog.Builder(this)
-                .setTitle("Tabs")
-                .setAdapter(new ArrayAdapter<>(this,
-                        android.R.layout.simple_list_item_1, names),
-                        (d, which) -> {
-                            if (which < copy.size())
-                                activateTab(copy.get(which).id);
-                            else newTab(homeUrl(), false);
-                        })
-                .setNegativeButton("Close", null)
-                .show();
+        TextView add = new TextView(this);
+        add.setText("＋ Tab baru");
+        add.setTextSize(15);
+        add.setPadding(pad, dp(12), pad, dp(12));
+        add.setTextColor(0xFF1EA446);
+        add.setOnClickListener(v -> {
+            dlg.dismiss();
+            newTab(homeUrl(), false);
+        });
+        root.addView(add);
+        ScrollView sv = new ScrollView(this);
+        sv.addView(root);
+        dlg.setView(sv);
+        dlg.show();
     }
 
     private void goBack() {
@@ -651,7 +833,7 @@ public class MainActivity extends Activity {
             public void onPageStarted(WebView v, String url, Bitmap favicon) {
                 if (tab == active) ui.post(() -> {
                     urlBar.setText(url);
-                    agentStatus.setText("Agent :8080");
+                    findViewById(R.id.error_view).setVisibility(View.GONE);
                     progressBar.setVisibility(View.VISIBLE);
                     progressBar.setProgress(10);
                     if (favicon != null) {
@@ -685,12 +867,21 @@ public class MainActivity extends Activity {
             public void onReceivedError(WebView v, WebResourceRequest r,
                                         android.webkit.WebResourceError e) {
                 if (r.isForMainFrame() && tab == active) {
-                    ui.post(() -> Toast.makeText(MainActivity.this,
-                            "Load error: " + e.getDescription(),
-                            Toast.LENGTH_SHORT).show());
+                    showError(String.valueOf(r.getUrl()),
+                            String.valueOf(e.getDescription()));
                 }
             }
         };
+    }
+
+    private void showError(final String url, final String desc) {
+        ui.post(() -> {
+            TextView d = findViewById(R.id.error_detail);
+            d.setText((desc == null || desc.isEmpty() ? "" : desc + "\n")
+                    + (url == null ? "" : url));
+            findViewById(R.id.error_view).setVisibility(View.VISIBLE);
+            progressBar.setVisibility(View.GONE);
+        });
     }
 
     private WebChromeClient makeChrome(final Tab tab) {
@@ -718,8 +909,14 @@ public class MainActivity extends Activity {
     private void navigate(String input) {
         String u = input.trim();
         if (!u.matches("^[a-zA-Z][a-zA-Z0-9+.-]*:.*")) {
-            if (u.contains(".") && !u.contains(" ")) u = "https://" + u;
-            else u = searchUrl(u);
+            if (u.matches(
+                    "^(localhost|\\d{1,3}(\\.\\d{1,3}){3})(:\\d+)?(/.*)?$")) {
+                u = "http://" + u; // dev server / IP lokal
+            } else if (u.contains(".") && !u.contains(" ")) {
+                u = "https://" + u;
+            } else {
+                u = searchUrl(u);
+            }
         }
         final String url = u;
         ui.post(() -> {
@@ -747,16 +944,29 @@ public class MainActivity extends Activity {
         return v;
     }
 
+    private final ArrayList<String> agentLogBuf = new ArrayList<>();
+
     private void agentNote(final String msg) {
+        agentLog(msg, 0);
+    }
+
+    /** Persistent agent activity log + colored toast.
+     *  level: 0 info, 1 ok, 2 warn, 3 error. */
+    private void agentLog(final String msg, final int level) {
         ui.post(() -> {
-            agentToast.setText("agent → " + msg);
+            java.text.SimpleDateFormat f = new java.text.SimpleDateFormat(
+                    "HH:mm:ss", java.util.Locale.US);
+            agentLogBuf.add(f.format(new java.util.Date()) + " " + msg);
+            if (agentLogBuf.size() > 50) agentLogBuf.remove(0);
+            agentToast.setText(msg);
+            int bg = level == 3 ? 0xDDB3261E
+                    : level == 2 ? 0xDDF9AB00
+                    : level == 1 ? 0xDD137333 : 0xCC202124;
+            agentToast.setBackgroundColor(bg);
             agentToast.setVisibility(View.VISIBLE);
-            agentStatus.setText("Agent :8080 • aktif");
             toastHide.removeCallbacksAndMessages(null);
-            toastHide.postDelayed(() -> {
-                agentToast.setVisibility(View.GONE);
-                agentStatus.setText("Agent :8080");
-            }, 4000);
+            toastHide.postDelayed(() -> agentToast.setVisibility(View.GONE),
+                    4000);
         });
     }
 
@@ -783,8 +993,7 @@ public class MainActivity extends Activity {
         return o;
     }
 
-    private void startAgentServer() {
-        server = new AgentServer((method, path, query, body) -> {
+    private void startAgentServer() {        server = new AgentServer((method, path, query, body) -> {
             switch (path) {
                 case "/status": {
                     JSONObject o = uiGet(() -> {
@@ -977,7 +1186,9 @@ public class MainActivity extends Activity {
         });
         try {
             server.start();
+            agentUp = true;
         } catch (Exception e) {
+            agentUp = false;
             Toast.makeText(this, "Agent server failed: " + e.getMessage(),
                     Toast.LENGTH_LONG).show();
         }
