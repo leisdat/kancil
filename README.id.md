@@ -93,21 +93,33 @@ kancil/                        # project root
 | **Stealth (sembunyikan jejak WebView)** | ❌ | ⚠️ (butuh Camoufox) | ✅ (default ON) |
 
 Engine `webview` nyambung ke aplikasi **Kancil Browser** (folder `android/`,
-APK ~73 KB) yang jalan di HP yang sama — Chromium beneran (System WebView).
+APK ~85 KB) yang jalan di HP yang sama — Chromium beneran (System WebView).
 Login/captcha cukup sekali di app, agent di Termux pakai session-nya terus:
 `kancil open --engine webview https://example.com`.
 
-> **Stabilitas sesi:** tiap `kancil ...` = proses baru yang baca ulang
-> `/status`. Kalau Android me-recreate app di background, ID tab bisa
-> bergeser — untuk sesi stabil pakai `kancil --engine webview shell`
-> (satu proses) atau `kancil daemon start`. Perintah lain:
-> `videos` (list video + src), `console`, `block add <pola>`,
-> `download <url>`, `upload <path>` (file chooser).
-
-> **Stabilitas sesi:** tiap `kancil ...` = proses baru yang baca ulang
-> `/status`. Kalau Android me-recreate app di background, ID tab bisa
-> bergeser — untuk sesi stabil pakai `kancil --engine webview shell`
-> (satu proses) atau `kancil daemon start`.
+> **Webview = session-stateful: drive dari SATU proses.** Tiap `kancil ...`
+> = proses baru yang baca ulang `/status`; kalau Android me-recreate app di
+> background, ID tab bisa bergeser antar-command. Untuk flow multi-langkah
+> pakai `kancil --engine webview shell` (satu sesi hidup) atau
+> `kancil daemon start` — jangan CLI per-command buat flow. Pola baru via
+> `block add` otomatis scrub HTTP cache (resource cached kalau nggak
+> di-scrub bakal lolos dari blocklist).
+>
+> Perintah lain: `videos` (list video + src), `console`, `block add <pola>`,
+> `download <url>`, `upload <path>` (file chooser), `crashes` (laporan crash
+> terakhir app).
+>
+> Selancar kaya manusia: `open <url> --idle` (tunggu readyState + network
+> diem, nggak perlu tebak sleep), `wait-idle`, `press Enter`
+> (KeyboardEvent beneran ke element fokus), `longpress <selector>`
+> (long-press ala mobile). `click` sekarang lapor URL + title tempat mendarat.
+>
+> Aman: `--dry-run` — isi form/composer sepuasnya, click/submit ke-block
+> kecuali `--confirm` (anti publish tak sengaja).
+>
+> Kalau app crash saat di-drive agent, UncaughtExceptionHandler restart
+> otomatis (max 3x per 5 menit, anti loop) dan stacktrace bisa dibaca via
+> `kancil --engine webview crashes`.
 
 ## Troubleshooting (engine webview)
 

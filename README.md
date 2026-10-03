@@ -80,7 +80,7 @@ full playback realistically needs a logged-in session).
 screenshots, PDF. Same API. Auto-detects Camoufox on Termux.
 
 **📱 WebView engine (new)** — `--engine webview` drives the
-**Kancil Browser** Android app (`android/`, ~81 KB APK) on the same phone:
+**Kancil Browser** Android app (`android/`, ~85 KB APK) on the same phone:
 real Chromium via System WebView. Log in / solve captchas once in the app,
 the Termux agent reuses that live session. Includes JS console capture,
 pattern-based request blocking (`kancil block add <pattern>`), native
