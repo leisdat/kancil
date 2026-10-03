@@ -419,7 +419,7 @@ class Kancil:
         return ok(imported=n, file=path)
 
     def storage(self, kind="local"):
-        data = self.engine.storage(kind)
+        data = self.engine.storage(kind) or {}
         return ok(kind=kind, origin=self.engine._origin(),
                   data=data, count=len(data),
                   real=self.capabilities["real_localstorage"],
@@ -538,7 +538,7 @@ class Kancil:
         data = extract_reader(p)
         if mode == "article":
             return ok(mode=mode, article={"title": data["title"],
-                                          "text": data["text"][:20000]})
+                                          "text": data["article"][:20000]})
         if mode == "links":
             return ok(mode=mode, links=data["links"])
         if mode == "images":

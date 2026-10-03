@@ -54,7 +54,7 @@ public class MainActivity extends Activity {
 
     /** One browser tab: its own WebView + network log. */
     private static class Tab {
-        final int id;
+        int id; // not final: restoreTabs reassigns the persisted ID
         final WebView web;
         final NetLog netlog = new NetLog();
         String title = "";
@@ -193,7 +193,15 @@ public class MainActivity extends Activity {
                 String url = o.optString("url", "");
                 if (url.isEmpty()) continue;
                 Tab t = newTabUi(url, true);
-                if (t != null && o.getInt("id") == activeId) toActivate = t;
+                if (t == null) continue;
+                // Preserve the original tab ID: without this, every OS
+                // recreate reassigns IDs and the agent's saved IDs go stale.
+                int savedId = o.optInt("id", -1);
+                if (savedId > 0) {
+                    t.id = savedId;
+                    if (savedId > tabSeq) tabSeq = savedId;
+                }
+                if (savedId == activeId) toActivate = t;
             }
             if (toActivate != null) activateTabUi(toActivate.id);
             else if (!tabs.isEmpty()) activateTabUi(tabs.get(0).id);

@@ -188,8 +188,20 @@ class WebViewEngine:
     def switch_tab(self, tab_id):
         r = self._post("/tabs/activate", {"id": str(tab_id)})
         if isinstance(r, dict) and r.get("ok"):
+            # Verify the app really switched: the tab list may be stale
+            # (Android can recreate the app, reassigning tab IDs).
+            try:
+                st = self._get("/status")
+                real = int(st.get("tab", -1))
+            except Exception:
+                real = -1
             self.cur = int(tab_id)
             self._invalidate()
+            if real != self.cur:
+                return {"success": False, "tab": real,
+                        "errors": ["tab %d no longer exists (app recreated? "
+                                   "active tab is now %d; run 'tabs' again)"
+                                   % (self.cur, real)]}
             return {"success": True, "tab": self.cur}
         return {"success": False,
                 "errors": [r.get("error", "switch failed")[:200]]
@@ -600,6 +612,23 @@ class WebViewEngine:
 
     # ---------- storage (real, via WebView) ----------
 
+    def forms(self):
+        """List forms on the page (same shape as the static engine)."""
+        try:
+            p = self.page
+        except Exception as e:
+            raise EngineError(str(e)[:150])
+        if not p:
+            return []
+        out = []
+        for i, fm in enumerate(p.forms or []):
+            out.append({"id": i + 1, "action": fm["action"],
+                        "method": fm["method"],
+                        "fields": [{"name": x["name"], "type": x["type"],
+                                    "label": x.get("label", "")[:40]}
+                                   for x in fm["inputs"] if x["name"]]})
+        return out
+
     def _origin(self):
         return ""
 
@@ -611,9 +640,12 @@ class WebViewEngine:
         if not r.get("success"):
             return {"__error__": str(r.get("errors"))[:150]}
         try:
-            return json.loads(r.get("result") or "{}")
+            # result may be the string "null"/"" (empty storage, blocked
+            # origin) -> json.loads gives None -> normalize to {}
+            data = json.loads(r.get("result") or "{}")
         except Exception:
-            return {}
+            data = {}
+        return data if isinstance(data, dict) else {}
 
     def storage_get(self, key, kind="local"):
         r = self.evaluate("%sStorage.getItem(%s)" % (kind, json.dumps(key)))

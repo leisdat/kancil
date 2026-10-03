@@ -375,3 +375,11 @@ Playwright session via `storage_state`, Agent Tool Interface
 - APK UI: navigate() kenali localhost/IP:port sebagai URL (http://).
 - APK UI: WindowInsets — toolbar aman dari notch/status bar.
 - APK: 73 KB (naik 6 KB dari 67 KB).
+
+## Unreleased (bugfix dari live test Hermes)
+- API: `extract(mode="article")` KeyError 'text' → pakai `data["article"]` (bug di semua engine, bukan cuma webview).
+- Engine webview: `storage()` normalisasi hasil `"null"`/None jadi `{}` (fix TypeError di `storage list`); api.storage juga defensif.
+- Engine webview: method `forms()` ditambahkan (sebelumnya AttributeError).
+- Engine webview: `switch_tab` verifikasi via /status setelah activate — ID basi (app di-recreate OS) kini gagal jujur, bukan "sukses" palsu.
+- APK: `restoreTabs()` pertahankan ID tab asli (sebelumnya tiap recreate kasih ID baru → ID agent basi). `Tab.id` tidak final lagi.
+- 17 unit tests WebView (4 baru: forms, storage null, switch verify, extract article).

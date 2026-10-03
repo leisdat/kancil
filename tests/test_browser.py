@@ -2190,7 +2190,8 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
     PAGE = (b"<html><head><title>WV Test</title></head><body>"
             b"<h1>Hi</h1><a href='https://example.com/x'>go</a>"
             b"<button id='b1'>Klik</button>"
-            b"<input name='q' type='text'></body></html>")
+            b"<form action='/s' method='get'>"
+            b"<input name='q' type='text'></form></body></html>")
     PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
     TABS = [{"id": 1, "url": "https://example.com/",
              "title": "WV Test", "active": True}]
@@ -2267,6 +2268,10 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
                     self._json({"ok": True, "result": "1"})
             elif "innerText" in expr and "includes" in expr:
                 self._json({"ok": True, "result": "true"})
+            elif "localStorage" in expr or "sessionStorage" in expr:
+                # empty/blocked storage -> JS null (the real APK returns
+                # the string "null" here)
+                self._json({"ok": True, "result": "null"})
             elif "localStorage" in expr:
                 self._json({"ok": True, "result": "{}"})
             elif "not-found" in expr:
@@ -2425,3 +2430,36 @@ class WebViewEngineTest(unittest.TestCase):
         self.assertFalse(c["computed_style"])
         self.assertFalse(c["forms"])
         self.assertFalse(c["console_capture"])
+
+    def test_forms(self):
+        forms = self.eng.forms()
+        self.assertEqual(len(forms), 1)
+        self.assertEqual(forms[0]["id"], 1)
+        self.assertEqual(forms[0]["action"], "https://example.com/s")
+        self.assertEqual(forms[0]["fields"][0]["name"], "q")
+
+    def test_storage_null_result(self):
+        # mock /js returns the string "null" (empty/blocked storage)
+        # -> must normalize to {}, never None
+        data = self.eng.storage("local")
+        self.assertEqual(data, {})
+
+    def test_switch_tab_verifies_real_state(self):
+        # mock /status always reports tab 1: switching to 2 must fail
+        # honestly instead of claiming success with a stale ID
+        r = self.eng.switch_tab(2)
+        self.assertFalse(r["success"])
+        self.assertIn("no longer exists", r["errors"][0])
+        r = self.eng.switch_tab(1)
+        self.assertTrue(r["success"], r)
+
+    def test_extract_article(self):
+        from kancil.api import Kancil
+        k = Kancil(engine="webview", webview_port=self.port)
+        try:
+            r = k.extract(mode="article")
+        finally:
+            k.close()
+        self.assertTrue(r["success"], r)
+        self.assertIn("title", r["article"])
+        self.assertIn("text", r["article"])
