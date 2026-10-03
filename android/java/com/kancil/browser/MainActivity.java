@@ -3,6 +3,7 @@ package com.kancil.browser;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.net.Uri;
@@ -11,6 +12,18 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Message;
+import android.view.PixelCopy;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.inputmethod.EditorInfo;
+import android.webkit.ConsoleMessage;
+import android.webkit.CookieManager;
+import android.webkit.JsPromptResult;
+import android.webkit.JsResult;
+import android.webkit.URLUtil;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.view.PixelCopy;
 import android.view.View;
 import android.view.ViewGroup;
@@ -57,9 +70,26 @@ public class MainActivity extends Activity {
         int id; // not final: restoreTabs reassigns the persisted ID
         final WebView web;
         final NetLog netlog = new NetLog();
+        // JS console buffer, filled by WebChromeClient.onConsoleMessage
+        // (UI thread). Synchronized: read from agent worker threads.
+        final java.util.List<JSONObject> consoleBuf =
+                java.util.Collections.synchronizedList(new java.util.ArrayList<>());
         String title = "";
         String defaultUA = "";
         Tab(int id, WebView web) { this.id = id; this.web = web; }
+
+        void consoleAdd(String level, String text, String source, int line) {
+            try {
+                JSONObject o = new JSONObject();
+                o.put("t", System.currentTimeMillis());
+                o.put("level", level);
+                o.put("text", text);
+                if (source != null) o.put("source", source);
+                o.put("line", line);
+                consoleBuf.add(o);
+                while (consoleBuf.size() > 200) consoleBuf.remove(0);
+            } catch (Exception ignored) {}
+        }
     }
 
     private FrameLayout webContainer;
@@ -128,6 +158,7 @@ public class MainActivity extends Activity {
 
         findViewById(R.id.btn_back).setOnClickListener(v -> goBack());
         findViewById(R.id.btn_fwd).setOnClickListener(v -> goForward());
+        applyKeepAlive(); // foreground service anti-freeze (bisa dimatikan)
         findViewById(R.id.btn_menu).setOnClickListener(v -> showMenu(v));
         findViewById(R.id.btn_retry).setOnClickListener(v -> {
             findViewById(R.id.error_view).setVisibility(View.GONE);
@@ -233,27 +264,19 @@ public class MainActivity extends Activity {
         s.setDisplayZoomControls(false);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        s.setSupportMultipleWindows(true); // popups -> onCreateWindow -> tab
+        s.setJavaScriptCanOpenWindowsAutomatically(true);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, true);
         w.setDownloadListener((url, userAgent, contentDisposition,
                                mimeType, contentLength) -> {
             try {
-                DownloadManager.Request req =
-                        new DownloadManager.Request(Uri.parse(url));
-                req.setMimeType(mimeType);
+                long id = enqueueDownload(url);
                 String name = URLUtil.guessFileName(url, contentDisposition,
                         mimeType);
-                req.setTitle(name);
-                req.setDescription("Kancil Browser");
-                req.setNotificationVisibility(DownloadManager.Request
-                        .VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                req.setDestinationInExternalPublicDir(
-                        Environment.DIRECTORY_DOWNLOADS, name);
-                DownloadManager dm = (DownloadManager)
-                        getSystemService(DOWNLOAD_SERVICE);
-                dm.enqueue(req);
                 Toast.makeText(MainActivity.this,
                         "Mengunduh: " + name, Toast.LENGTH_SHORT).show();
+                agentNote("download #" + id + " " + name);
             } catch (Exception e) {
                 Toast.makeText(MainActivity.this,
                         "Download gagal: " + e.getMessage(),
@@ -266,6 +289,26 @@ public class MainActivity extends Activity {
 
     private boolean adblock() { return prefs.getBoolean("adblock", true); }
     private boolean dataSaver() { return prefs.getBoolean("datasaver", false); }
+
+    // Foreground keep-alive: fights MIUI/EMUI task killers that freeze the
+    // app (and its agent server) when the screen goes off.
+    private boolean keepAlive() { return prefs.getBoolean("keepalive", true); }
+
+    private void applyKeepAlive() {
+        Intent i = new Intent(this, AgentKeepAliveService.class);
+        try {
+            if (keepAlive()) {
+                if (android.os.Build.VERSION.SDK_INT >= 26)
+                    startForegroundService(i);
+                else
+                    startService(i);
+            } else {
+                stopService(i);
+            }
+        } catch (Exception e) {
+            agentNote("keepalive: " + e.getMessage());
+        }
+    }
     private boolean desktop() { return prefs.getBoolean("desktop", false); }
     private boolean dark() { return prefs.getBoolean("dark", false); }
 
@@ -279,16 +322,18 @@ public class MainActivity extends Activity {
     private void applyToggles(Tab tab) {
         WebSettings s = tab.web.getSettings();
         s.setBlockNetworkImage(dataSaver());
+        String ua = tab.defaultUA.isEmpty()
+                ? s.getUserAgentString() : tab.defaultUA;
         if (desktop()) {
-            String ua = tab.defaultUA.isEmpty()
-                    ? s.getUserAgentString() : tab.defaultUA;
             // turn the mobile UA into a desktop one, keeping the version
             ua = ua.replace("; Mobile", "").replace("Mobile ", "")
                    .replace("Android ", "");
-            s.setUserAgentString(ua);
-        } else if (!tab.defaultUA.isEmpty()) {
-            s.setUserAgentString(tab.defaultUA);
         }
+        if (stealth()) {
+            // drop the WebView tell ("Version/4.0") -> looks like real Chrome
+            ua = ua.replace("Version/4.0 ", "");
+        }
+        s.setUserAgentString(ua);
     }
 
     private boolean isUiThread() {
@@ -327,6 +372,16 @@ public class MainActivity extends Activity {
         if (url != null) w.loadUrl(url);
         updateTabCount();
         saveTabs();
+        // Cap tabs at 12: recycle the oldest non-active tab so a stale
+        // restored session can't pile up dozens of tabs.
+        if (tabs.size() > 12) {
+            for (Tab t : new java.util.ArrayList<>(tabs)) {
+                if (t.id != tab.id && t != active) {
+                    closeTabUi(t.id);
+                    break;
+                }
+            }
+        }
         return tab;
     }
 
@@ -472,10 +527,18 @@ public class MainActivity extends Activity {
         final CheckBox cbDark = new CheckBox(this);
         cbDark.setText("Mode malam");
         cbDark.setChecked(dark());
+        final CheckBox cbKeep = new CheckBox(this);
+        cbKeep.setText("Jaga agent tetap hidup (anti-freeze MIUI)");
+        cbKeep.setChecked(keepAlive());
+        final CheckBox cbStealth = new CheckBox(this);
+        cbStealth.setText("Mode stealth (sembunyikan jejak WebView)");
+        cbStealth.setChecked(stealth());
         root.addView(cbAd);
         root.addView(cbData);
         root.addView(cbDesk);
         root.addView(cbDark);
+        root.addView(cbKeep);
+        root.addView(cbStealth);
 
         ScrollView sv = new ScrollView(this);
         sv.addView(root);
@@ -498,7 +561,10 @@ public class MainActivity extends Activity {
                             .putBoolean("datasaver", cbData.isChecked())
                             .putBoolean("desktop", cbDesk.isChecked())
                             .putBoolean("dark", cbDark.isChecked())
+                            .putBoolean("keepalive", cbKeep.isChecked())
+                            .putBoolean("stealth", cbStealth.isChecked())
                             .apply();
+                    applyKeepAlive();
                     if (darkChanged) {
                         recreate(); // theme native diganti
                         return;
@@ -559,6 +625,19 @@ public class MainActivity extends Activity {
             "(function(){var s=document.getElementById('kancil-dark');"
             + "if(s)s.remove();})()";
 
+    // Agent-controlled request blocklist (pattern = URL substring).
+    // Written from agent worker threads, read from WebView threads.
+    private final java.util.List<String> agentBlock =
+            java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
+    private boolean isAgentBlocked(String url) {
+        String u = url.toLowerCase();
+        synchronized (agentBlock) {
+            for (String p : agentBlock) if (u.contains(p)) return true;
+        }
+        return false;
+    }
+
     private void setDarkAll(boolean on) {
         ui.post(() -> {
             for (Tab t : new ArrayList<>(tabs))
@@ -566,7 +645,66 @@ public class MainActivity extends Activity {
         });
     }
 
-    // ---------- find in page ----------
+    // Stealth: hide the small JS tells that mark a WebView as automation.
+    // Principle (ala Camoufox): patch only what's fake-or-missing, never
+    // randomize genuine values — consistency beats randomness. Real phone =
+    // real hardware/fonts/touch, so only 3 things need fixing.
+    private static final String STEALTH_JS =
+            "(function(){"
+            + "try{Object.defineProperty(navigator,'webdriver',"
+            + "{get:function(){return undefined;},configurable:true});}"
+            + "catch(e){}"
+            + "try{if(!window.chrome)window.chrome={};"
+            + "if(!window.chrome.csi)window.chrome.csi=function(){};"
+            + "if(!window.chrome.loadTimes)"
+            + "window.chrome.loadTimes=function(){};"
+            + "if(!window.chrome.runtime)window.chrome.runtime={};}"
+            + "catch(e){}"
+            + "})();";
+
+    private boolean stealth() { return prefs.getBoolean("stealth", true); }
+
+    private static WebResourceResponse emptyResponse() {        try {
+            return new WebResourceResponse("text/plain", "utf-8",
+                    200, "OK", new HashMap<String, String>(),
+                    new java.io.ByteArrayInputStream(new byte[0]));
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    // Download history (agent-visible). Guarded by its own lock:
+    // written on UI thread (DownloadListener), read on agent threads.
+    private final java.util.List<JSONObject> downloadList =
+            java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
+    private void trackDownload(String url, String name, long id) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("t", System.currentTimeMillis());
+            o.put("url", url);
+            o.put("name", name);
+            o.put("id", id);
+            downloadList.add(o);
+            while (downloadList.size() > 50) downloadList.remove(0);
+        } catch (Exception ignored) {}
+    }
+
+    private long enqueueDownload(String url) {
+        DownloadManager.Request req =
+                new DownloadManager.Request(Uri.parse(url));
+        String name = URLUtil.guessFileName(url, null, null);
+        req.setTitle(name);
+        req.setDescription("Kancil Browser");
+        req.setNotificationVisibility(DownloadManager.Request
+                .VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+        req.setDestinationInExternalPublicDir(
+                Environment.DIRECTORY_DOWNLOADS, name);
+        DownloadManager dm = (DownloadManager)
+                getSystemService(DOWNLOAD_SERVICE);
+        long id = dm.enqueue(req);
+        trackDownload(url, name, id);
+        return id;
+    }
 
     private void showFindDialog() {
         final EditText input = new EditText(this);
@@ -818,15 +956,15 @@ public class MainActivity extends Activity {
             public WebResourceResponse shouldInterceptRequest(WebView v,
                                                              WebResourceRequest r) {
                 String url = String.valueOf(r.getUrl());
+                if (isAgentBlocked(url)) {
+                    NetLog.Entry e = tab.netlog.add(r.getMethod(), url, null);
+                    tab.netlog.fail(e, "blocked:agent");
+                    return emptyResponse();
+                }
                 if (adblock() && isAd(url)) {
                     NetLog.Entry e = tab.netlog.add(r.getMethod(), url, null);
                     tab.netlog.fail(e, "blocked:adblock");
-                    try {
-                        return new WebResourceResponse("text/plain", "utf-8",
-                                200, "OK", new HashMap<String, String>(),
-                                new java.io.ByteArrayInputStream(new byte[0]));
-                    } catch (Exception ignored) {}
-                    return null;
+                    return emptyResponse();
                 }
                 Map<String, String> h = new HashMap<>();
                 try {
@@ -839,6 +977,9 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageStarted(WebView v, String url, Bitmap favicon) {
+                // Stealth first: patch the JS tells before page scripts run
+                // (best effort — the context may still be warming up).
+                if (stealth()) v.evaluateJavascript(STEALTH_JS, null);
                 if (tab == active) ui.post(() -> {
                     urlBar.setText(url);
                     findViewById(R.id.error_view).setVisibility(View.GONE);
@@ -892,6 +1033,12 @@ public class MainActivity extends Activity {
         });
     }
 
+    // Agent-driven file upload: /upload sets a path, the next
+    // onShowFileChooser feeds it to the page automatically.
+    private volatile String pendingUploadPath = null;
+    private ValueCallback<Uri[]> manualFileCb = null;
+    private static final int FILE_PICKER_REQ = 4101;
+
     private WebChromeClient makeChrome(final Tab tab) {
         return new WebChromeClient() {
             @Override
@@ -911,7 +1058,133 @@ public class MainActivity extends Activity {
                     }
                 });
             }
+
+            // Real console capture: every console.* + page error lands
+            // here, including messages fired before page load.
+            @Override
+            public boolean onConsoleMessage(ConsoleMessage m) {
+                String lvl = "log";
+                try {
+                    switch (m.messageLevel()) {
+                        case ERROR: lvl = "error"; break;
+                        case WARNING: lvl = "warn"; break;
+                        case DEBUG: lvl = "debug"; break;
+                        case LOG: case TIP: default: lvl = "log"; break;
+                    }
+                } catch (Exception ignored) {}
+                String src = null;
+                int line = 0;
+                try { src = m.sourceId(); line = m.lineNumber(); }
+                catch (Exception ignored) {}
+                tab.consoleAdd(lvl, m.message(), src, line);
+                return true;
+            }
+
+            // JS dialogs: auto-accept + log for the agent (a hanging
+            // dialog would freeze the page otherwise).
+            @Override
+            public boolean onJsAlert(WebView v, String url, String msg,
+                                     JsResult r) {
+                tab.consoleAdd("warn", "js alert: " + msg, url, 0);
+                agentNote("js alert dismissed");
+                r.confirm();
+                return true;
+            }
+
+            @Override
+            public boolean onJsConfirm(WebView v, String url, String msg,
+                                       JsResult r) {
+                tab.consoleAdd("warn", "js confirm (accepted): " + msg,
+                        url, 0);
+                r.confirm();
+                return true;
+            }
+
+            @Override
+            public boolean onJsPrompt(WebView v, String url, String msg,
+                                      String def, JsPromptResult r) {
+                tab.consoleAdd("warn", "js prompt (default): " + msg, url, 0);
+                r.confirm(def != null ? def : "");
+                return true;
+            }
+
+            // Popup (window.open / target=_blank) -> new tab.
+            // Runs on the UI thread already: create the tab synchronously.
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog,
+                                          boolean isUserGesture,
+                                          Message resultMsg) {
+                try {
+                    Tab t = newTabUi(null, true);
+                    WebView.WebViewTransport transport =
+                            (WebView.WebViewTransport) resultMsg.obj;
+                    transport.setWebView(t.web);
+                    resultMsg.sendToTarget();
+                    agentNote("popup -> tab " + t.id);
+                    return true;
+                } catch (Exception e) {
+                    agentNote("popup failed: " + e.getMessage());
+                    return false;
+                }
+            }
+
+            @Override
+            public void onCloseWindow(WebView window) {
+                ui.post(() -> {
+                    for (Tab t : new java.util.ArrayList<>(tabs)) {
+                        if (t.web == window) { closeTab(t.id); break; }
+                    }
+                });
+            }
+
+            // File upload: agent path (/upload) wins; otherwise the
+            // manual system picker (fixes file inputs for humans too).
+            @Override
+            public boolean onShowFileChooser(WebView v,
+                                             ValueCallback<Uri[]> cb,
+                                             FileChooserParams p) {
+                String pend = pendingUploadPath;
+                pendingUploadPath = null;
+                if (pend != null) {
+                    java.io.File f = new java.io.File(pend);
+                    if (f.exists()) {
+                        tab.consoleAdd("log", "upload: " + pend, null, 0);
+                        cb.onReceiveValue(
+                                new Uri[]{Uri.fromFile(f)});
+                        return true;
+                    }
+                }
+                if (manualFileCb != null) manualFileCb.onReceiveValue(null);
+                manualFileCb = cb;
+                try {
+                    Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                    i.addCategory(Intent.CATEGORY_OPENABLE);
+                    i.setType("*/*");
+                    startActivityForResult(
+                            Intent.createChooser(i, "Pilih file"),
+                            FILE_PICKER_REQ);
+                } catch (Exception e) {
+                    manualFileCb = null;
+                    cb.onReceiveValue(null);
+                }
+                return true;
+            }
         };
+    }
+
+    @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req == FILE_PICKER_REQ && manualFileCb != null) {
+            ValueCallback<Uri[]> cb = manualFileCb;
+            manualFileCb = null;
+            if (res == Activity.RESULT_OK && data != null
+                    && data.getData() != null) {
+                cb.onReceiveValue(new Uri[]{data.getData()});
+            } else {
+                cb.onReceiveValue(null);
+            }
+        }
     }
 
     private void navigate(String input) {
@@ -1009,7 +1282,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.2");
+                            oo.put("agent", "kancil-browser/1.6");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -1127,6 +1400,136 @@ public class MainActivity extends Activity {
                     agentNote("js");
                     return AgentServer.Response.json(o);
                 }
+                case "/console": {
+                    Tab ct = active;
+                    String tabQ = query.get("tab");
+                    if (tabQ != null) {
+                        try {
+                            Tab ft = findTab(Integer.parseInt(tabQ));
+                            if (ft != null) ct = ft;
+                        } catch (Exception ignored) {}
+                    }
+                    final Tab fct = ct;
+                    JSONArray logs = new JSONArray();
+                    // synchronizedList: iterate under its lock, no UI hop
+                    // needed (onConsoleMessage writes from the UI thread).
+                    synchronized (fct.consoleBuf) {
+                        for (JSONObject e : fct.consoleBuf) logs.put(e);
+                    }
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true); o.put("logs", logs);
+                    return AgentServer.Response.json(o);
+                }
+                case "/console/clear": {
+                    ui.post(() -> active.consoleBuf.clear());
+                    return ok();
+                }
+                case "/blocklist": {
+                    if ("POST".equals(method)) {
+                        JSONArray a = body.optJSONArray("patterns");
+                        synchronized (agentBlock) {
+                            agentBlock.clear();
+                            if (a != null) for (int i = 0; i < a.length(); i++) {
+                                String p = a.optString(i, "").toLowerCase().trim();
+                                if (!p.isEmpty()) agentBlock.add(p);
+                            }
+                        }
+                        JSONObject o = new JSONObject();
+                        o.put("ok", true);
+                        o.put("patterns", agentBlock.size());
+                        agentNote("blocklist " + agentBlock.size() + " patterns");
+                        return AgentServer.Response.json(o);
+                    }
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true);
+                    synchronized (agentBlock) {
+                        o.put("patterns", new JSONArray(agentBlock));
+                    }
+                    return AgentServer.Response.json(o);
+                }
+                case "/screenshot/full": {
+                    byte[] png = fullScreenshot();
+                    agentNote("screenshot full (" + png.length + " bytes)");
+                    return new AgentServer.Response(200, "image/png", png);
+                }
+                case "/screenshot/element": {
+                    String sel = body.optString("selector",
+                            query.get("selector"));
+                    if (sel == null || sel.isEmpty())
+                        return AgentServer.Response.err(400,
+                                "missing selector");
+                    byte[] png = elementScreenshot(sel);
+                    agentNote("screenshot element (" + png.length
+                            + " bytes)");
+                    return new AgentServer.Response(200, "image/png", png);
+                }
+                case "/videos": {
+                    String r = evalJs("(function(){var v=[];"
+                            + "document.querySelectorAll('video')"
+                            + ".forEach(function(el,i){"
+                            + "var src=el.currentSrc||el.src||'';"
+                            + "if(!src){var s=el.querySelector('source');"
+                            + "if(s)src=s.src||'';}"
+                            + "v.push({index:i,src:src,duration:el.duration||0,"
+                            + "currentTime:el.currentTime||0,paused:!!el.paused,"
+                            + "width:el.videoWidth||0,height:el.videoHeight||0});"
+                            + "});return JSON.stringify(v)})()");
+                    JSONArray arr = new JSONArray();
+                    try {
+                        if (r != null && !r.isEmpty() && !"null".equals(r))
+                            arr = new JSONArray(r);
+                    } catch (Exception ignored) {}
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true); o.put("videos", arr);
+                    return AgentServer.Response.json(o);
+                }
+                case "/form/fill": {
+                    int fi = body.optInt("form", 0);
+                    JSONObject fields = body.optJSONObject("fields");
+                    boolean submit = body.optBoolean("submit", false);
+                    JSONObject res = fillForm(fi,
+                            fields != null ? fields : new JSONObject(),
+                            submit);
+                    JSONArray done = res.optJSONArray("filled");
+                    agentNote("form fill +" + (done != null
+                            ? done.length() : 0));
+                    return AgentServer.Response.json(res);
+                }
+                case "/upload": {
+                    String p = body.optString("path", query.get("path"));
+                    if (p == null || p.isEmpty())
+                        return AgentServer.Response.err(400, "missing path");
+                    java.io.File f = new java.io.File(p);
+                    if (!f.exists())
+                        return AgentServer.Response.err(400,
+                                "file not found: " + p);
+                    pendingUploadPath = p;
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true); o.put("path", p);
+                    o.put("hint", "click a file input next; the chooser "
+                            + "is fed automatically");
+                    agentNote("upload staged: " + p);
+                    return AgentServer.Response.json(o);
+                }
+                case "/download": {
+                    String u = body.optString("url", query.get("url"));
+                    if (u == null || u.isEmpty())
+                        return AgentServer.Response.err(400, "missing url");
+                    long id = enqueueDownload(u);
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true); o.put("id", id);
+                    agentNote("agent download #" + id);
+                    return AgentServer.Response.json(o);
+                }
+                case "/downloads": {
+                    JSONArray arr = new JSONArray();
+                    synchronized (downloadList) {
+                        for (JSONObject e : downloadList) arr.put(e);
+                    }
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true); o.put("downloads", arr);
+                    return AgentServer.Response.json(o);
+                }
                 case "/click": {
                     String sel = body.optString("selector", query.get("selector"));
                     if (sel == null) return AgentServer.Response.err(400, "missing selector");
@@ -1144,11 +1547,18 @@ public class MainActivity extends Activity {
                     String text = body.optString("text", query.get("text"));
                     if (sel == null || text == null)
                         return AgentServer.Response.err(400, "missing selector/text");
+                    // Native setter (not execCommand): works with React/Vue
+                    // controlled inputs. selectAll first to replace content.
                     String r = evalJs("(function(){var el=document.querySelector("
                             + JSONObject.quote(sel) + ");if(!el) return 'not-found';"
-                            + "el.focus();document.execCommand('selectAll',false,null);"
-                            + "document.execCommand('insertText',false,"
-                            + JSONObject.quote(text) + ");"
+                            + "el.focus();"
+                            + "try{el.select();}catch(e){}"
+                            + "var proto=el.tagName==='TEXTAREA'"
+                            + "?HTMLTextAreaElement.prototype"
+                            + ":HTMLInputElement.prototype;"
+                            + "var d=Object.getOwnPropertyDescriptor(proto,'value');"
+                            + "var t=" + JSONObject.quote(text) + ";"
+                            + "if(d&&d.set)d.set.call(el,t);else el.value=t;"
                             + "el.dispatchEvent(new Event('input',{bubbles:true}));"
                             + "el.dispatchEvent(new Event('change',{bubbles:true}));"
                             + "return 'typed'})()");
@@ -1238,12 +1648,178 @@ public class MainActivity extends Activity {
                 latch.countDown();
             }
         });
-        if (!latch.await(15, TimeUnit.SECONDS)) throw new Exception("screenshot timeout");
+        if (!latch.await(30, TimeUnit.SECONDS)) throw new Exception("screenshot timeout");
         Bitmap bmp = ref.get();
         if (bmp == null) throw new Exception("screenshot failed");
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         bmp.compress(Bitmap.CompressFormat.PNG, 100, bos);
         return bos.toByteArray();
+    }
+
+    /** Full-page screenshot: scroll tile-by-tile, stitch natively.
+     *  Called on a worker thread; hops to the UI thread as needed.
+     *  RGB_565 (2 bytes/px) + 4000px cap: OOM guard for low-end phones.
+     *  Catches Throwable: an OOM must become a 500, never a dead thread. */
+    private byte[] fullScreenshot() throws Exception {
+        final int[] dims = uiGet(() -> {
+            WebView w = activeWeb();
+            return new int[]{w.getWidth(), w.getHeight(),
+                    (int) (w.getContentHeight() * w.getScale()),
+                    w.getScrollY()};
+        });
+        int vw = dims[0], vh = dims[1];
+        int totalH = Math.min(dims[2], 4000);
+        final int origY = dims[3];
+        if (vw <= 0 || vh <= 0 || totalH <= vh) return screenshot();
+        Bitmap full;
+        try {
+            full = Bitmap.createBitmap(vw, totalH, Bitmap.Config.RGB_565);
+        } catch (Throwable t) {
+            throw new Exception("full screenshot OOM at "
+                    + vw + "x" + totalH + ": " + t.getMessage());
+        }
+        android.graphics.Canvas canvas = new android.graphics.Canvas(full);
+        try {
+            for (int y = 0; y < totalH; y += vh) {
+                final int sy = y;
+                final CountDownLatch latch = new CountDownLatch(1);
+                final Bitmap[] tile = new Bitmap[1];
+                ui.post(() -> {
+                    final WebView w = activeWeb();
+                    w.scrollTo(0, sy);
+                    ui.postDelayed(() -> {
+                        try {
+                            Bitmap b = Bitmap.createBitmap(vw, vh,
+                                    Bitmap.Config.RGB_565);
+                            w.draw(new android.graphics.Canvas(b));
+                            tile[0] = b;
+                        } catch (Throwable ignored) {}
+                        latch.countDown();
+                    }, 300);
+                });
+                if (!latch.await(15, TimeUnit.SECONDS)) break;
+                if (tile[0] != null) {
+                    canvas.drawBitmap(tile[0], 0, sy, null);
+                    tile[0].recycle();
+                }
+            }
+        } finally {
+            ui.post(() -> {
+                try { activeWeb().scrollTo(0, origY); }
+                catch (Exception ignored) {}
+            });
+        }
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        full.compress(Bitmap.CompressFormat.PNG, 90, bos);
+        full.recycle();
+        byte[] out = bos.toByteArray();
+        if (out.length == 0) throw new Exception("full screenshot failed");
+        return out;
+    }
+
+    /** Element screenshot: scroll the element to viewport center, capture
+     *  the window, crop natively. Called on a worker thread. */
+    private byte[] elementScreenshot(String selector) throws Exception {
+        String q = selector.replace("\\", "\\\\").replace("\"", "\\\"");
+        String r = evalJs("(function(s){try{"
+                + "var el=document.querySelector(\"" + q + "\");"
+                + "if(!el)return 'null';"
+                + "el.scrollIntoView({block:'center',inline:'center'});"
+                + "var b=el.getBoundingClientRect();"
+                + "return b.width+'|'+b.height+'|'+window.innerWidth;}"
+                + "catch(e){return 'ERR:'+e.message}})(\"" + q + "\")");
+        if (r == null || r.equals("null") || r.startsWith("ERR:"))
+            throw new Exception("element not found: " + selector);
+        String[] parts = r.split("\\|");
+        double ew = Double.parseDouble(parts[0]);
+        double eh = Double.parseDouble(parts[1]);
+        double cssW = parts.length > 2 ? Double.parseDouble(parts[2]) : 0;
+        Thread.sleep(400); // let the scroll settle (worker thread)
+        final int vw = uiGet(() -> activeWeb().getWidth());
+        byte[] win = screenshot();
+        Bitmap bmp = android.graphics.BitmapFactory.decodeByteArray(
+                win, 0, win.length);
+        if (bmp == null) throw new Exception("capture failed");
+        // CSS px -> device px: window shot is device pixels, rect is CSS px.
+        float scale = (cssW > 0) ? (float) vw / (float) cssW : 1f;
+        if (scale <= 0 || scale > 10) scale = 1f; // sanity
+        int cw = Math.min(bmp.getWidth(),
+                Math.max(1, (int) (ew * scale)));
+        int ch = Math.min(bmp.getHeight(),
+                Math.max(1, (int) (eh * scale)));
+        int cx = Math.max(0, (bmp.getWidth() - cw) / 2);
+        int cy = Math.max(0, (bmp.getHeight() - ch) / 2);
+        Bitmap crop = Bitmap.createBitmap(bmp, cx, cy, cw, ch);
+        bmp.recycle();
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        crop.compress(Bitmap.CompressFormat.PNG, 90, bos);
+        crop.recycle();
+        return bos.toByteArray();
+    }
+
+    /** Fill form #fi with {name: value}. Values starting with "@" are
+     *  file paths: staged for onShowFileChooser and the file input is
+     *  clicked natively. React-safe value setting + input/change events. */
+    private JSONObject fillForm(int fi, JSONObject fields,
+                                boolean submit) throws Exception {
+        // Stage file fields first (native side), click their inputs.
+        java.util.Iterator<String> keys = fields.keys();
+        while (keys.hasNext()) {
+            String k = keys.next();
+            String v = fields.optString(k, "");
+            if (v.startsWith("@")) {
+                String p = v.substring(1);
+                if (new java.io.File(p).exists()) {
+                    pendingUploadPath = p;
+                    String q = k.replace("\\", "\\\\").replace("'", "\\'");
+                    evalJs("(function(){var f=document.forms[" + fi + "];"
+                            + "if(!f)return 'noform';"
+                            + "var el=f.elements['" + q + "'];"
+                            + "if(el){el.click();return 'clicked';}"
+                            + "return 'missing'})()");
+                }
+            }
+        }
+        String js = "(function(fi,vals){"
+                + "var out={ok:true,filled:[],missing:[]};"
+                + "var f=document.forms[fi];"
+                + "if(!f){out.ok=false;out.error='no such form';"
+                + "return JSON.stringify(out);}"
+                + "for(var name in vals){"
+                + "var v=vals[name];"
+                + "if(typeof v==='string'&&v.charAt(0)==='@')continue;"
+                + "var el=f.elements[name];"
+                + "if(!el){out.missing.push(name);continue;}"
+                + "if(el.length&&!el.tagName){"
+                + "for(var i=0;i<el.length;i++){"
+                + "if(el[i].value==v){el[i].checked=true;"
+                + "el[i].dispatchEvent(new Event('change',{bubbles:true}));}}"
+                + "out.filled.push(name);continue;}"
+                + "var tag=el.tagName;"
+                + "if(tag==='SELECT'){el.value=v;}"
+                + "else if(el.type==='checkbox'){"
+                + "el.checked=(v==='true'||v==='1');}"
+                + "else{var proto=tag==='TEXTAREA'"
+                + "?HTMLTextAreaElement.prototype"
+                + ":HTMLInputElement.prototype;"
+                + "var d=Object.getOwnPropertyDescriptor(proto,'value');"
+                + "if(d&&d.set)d.set.call(el,v);else el.value=v;}"
+                + "el.dispatchEvent(new Event('input',{bubbles:true}));"
+                + "el.dispatchEvent(new Event('change',{bubbles:true}));"
+                + "out.filled.push(name);}"
+                + (submit
+                    ? "if(f.requestSubmit)f.requestSubmit();else f.submit();"
+                    : "")
+                + "return JSON.stringify(out);})("
+                + fi + "," + fields.toString() + ")";
+        String res = evalJs(js);
+        JSONObject o = new JSONObject();
+        try {
+            if (res != null && !res.isEmpty() && !"null".equals(res))
+                o = new JSONObject(res);
+        } catch (Exception ignored) {}
+        if (!o.has("ok")) o.put("ok", true);
+        return o;
     }
 
     @Override
@@ -1261,6 +1837,9 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        try {
+            stopService(new Intent(this, AgentKeepAliveService.class));
+        } catch (Exception ignored) {}
         if (server != null) server.stop();
         for (Tab t : tabs) t.web.destroy();
         super.onDestroy();

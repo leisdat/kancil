@@ -4,6 +4,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
 
     <application
@@ -28,5 +30,13 @@
                 <data android:scheme="https" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".AgentKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Menjaga agent browser (127.0.0.1:8080) tetap hidup saat layar mati" />
+        </service>
     </application>
 </manifest>

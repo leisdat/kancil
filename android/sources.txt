@@ -1,0 +1,5 @@
+java/com/kancil/browser/NetLog.java
+java/com/kancil/browser/AgentServer.java
+java/com/kancil/browser/MainActivity.java
+java/com/kancil/browser/AgentKeepAliveService.java
+gen/com/kancil/browser/R.java

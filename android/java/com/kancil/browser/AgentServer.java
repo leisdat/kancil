@@ -120,10 +120,12 @@ public class AgentServer {
             Response r;
             try {
                 r = handler.handle(method, path, query, body);
-            } catch (Exception e) {
+            } catch (Throwable e) {
+                // Throwable, not Exception: an OOM must become a 500,
+                // never a silently dead handler thread.
+                String msg = String.valueOf(e.getMessage());
                 r = Response.err(500, e.getClass().getSimpleName() + ": "
-                        + String.valueOf(e.getMessage()).substring(0,
-                                Math.min(200, String.valueOf(e.getMessage()).length())));
+                        + msg.substring(0, Math.min(200, msg.length())));
             }
             writeResponse(out, r);
             s.close();
