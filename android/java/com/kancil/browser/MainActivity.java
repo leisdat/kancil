@@ -518,28 +518,38 @@ public class MainActivity extends Activity {
         return (int) (v * getResources().getDisplayMetrics().density);
     }
 
+    // Emerald & Gold palette. Light: warm ivory + deep emerald + gold
+    // accents. Dark: noir green-tinted + champagne gold.
     private void applyUiTheme() {
         boolean dk = dark();
         urlBar.setBackgroundResource(
                 dk ? R.drawable.url_bg_dark : R.drawable.url_bg);
-        urlBar.setTextColor(dk ? 0xFFE8EAED : 0xFF202124);
-        urlBar.setHintTextColor(dk ? 0xFF9AA0A6 : 0xFF80868B);
-        int tint = dk ? 0xFFE8EAED : 0xFF5F6368;
+        urlBar.setTextColor(dk ? 0xFFEDE8DC : 0xFF1F2A24);
+        urlBar.setHintTextColor(dk ? 0xFF8A948E : 0xFF9A917E);
+        int tint = dk ? 0xFFEDE8DC : 0xFF0E5C43;
         ((ImageButton) findViewById(R.id.btn_back)).setColorFilter(tint);
         ((ImageButton) findViewById(R.id.btn_fwd)).setColorFilter(tint);
         ((ImageButton) findViewById(R.id.btn_menu)).setColorFilter(tint);
-        tabCountBtn.setTextColor(dk ? 0xFF81C995 : 0xFF137333);
-        getWindow().setStatusBarColor(dk ? 0xFF202124 : 0xFF0E6B2E);
+        findViewById(R.id.toolbar).setBackgroundColor(
+                dk ? 0xFF12140F : 0xFFFDFCF8);
+        tabCountBtn.setTextColor(dk ? 0xFFD4B978 : 0xFF0E5C43);
+        // Agent pill is deep emerald in both modes; status text stays light.
+        agentStatus.setTextColor(0xFFEDE8DC);
+        View pill = (View) findViewById(R.id.agent_status).getParent();
+        pill.setBackgroundResource(
+                dk ? R.drawable.pill_bg_dark : R.drawable.pill_bg);
+        getWindow().setStatusBarColor(dk ? 0xFF0C0E0D : 0xFF0B3D2E);
     }
 
     private void setAgentStatus(final boolean up) {
         ui.post(() -> {
-            boolean dk = dark();
             agentStatus.setText(up ? "● Agent aktif" : "○ Agent terputus");
-            agentStatus.setTextColor(up
-                    ? (dk ? 0xFF81C995 : 0xFF137333) : 0xFFB3261E);
-            findViewById(R.id.agent_dot).setBackgroundColor(
-                    up ? 0xFF1EA446 : 0xFFB3261E);
+            agentStatus.setTextColor(up ? 0xFFEDE8DC : 0xFFF5C6A8);
+            android.graphics.drawable.GradientDrawable dot =
+                    new android.graphics.drawable.GradientDrawable();
+            dot.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+            dot.setColor(up ? 0xFFD4B978 : 0xFFB3261E);
+            findViewById(R.id.agent_dot).setBackground(dot);
             agentStatus.setContentDescription(up
                     ? "Agent aktif di port 8080" : "Agent terputus");
         });
@@ -602,7 +612,7 @@ public class MainActivity extends Activity {
             if (ENGINES[i][0].equals(cur)) selEng[0] = i;
         rg.setOnCheckedChangeListener((g, id) -> selEng[0] = id - 1000);
 
-        new AlertDialog.Builder(this)
+        roundDialog(new AlertDialog.Builder(this)
                 .setTitle("Pengaturan")
                 .setView(sv)
                 .setPositiveButton("OK", (d, which) -> {
@@ -632,7 +642,7 @@ public class MainActivity extends Activity {
                             Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("Batal", null)
-                .show();
+                .show());
     }
 
     // ---------- reader mode ----------
@@ -867,6 +877,7 @@ public class MainActivity extends Activity {
         d.setOnDismissListener(dlg -> ui.post(() ->
                 activeWeb().clearMatches()));
         d.show();
+        roundDialog(d);
     }
 
     private void showMenu(View anchor) {
@@ -975,11 +986,18 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(120)));
         root.addView(sv);
 
-        new AlertDialog.Builder(this)
+        roundDialog(new AlertDialog.Builder(this)
                 .setTitle("Agent API")
                 .setView(root)
                 .setPositiveButton("Tutup", null)
-                .show();
+                .show());
+    }
+
+    /** Rounded dialog shell for the luxury theme. */
+    private void roundDialog(android.app.AlertDialog d) {
+        if (d.getWindow() != null)
+            d.getWindow().setBackgroundDrawableResource(
+                    dark() ? R.drawable.dialog_bg_dark : R.drawable.dialog_bg);
     }
 
     private boolean serverUp() {
@@ -996,10 +1014,27 @@ public class MainActivity extends Activity {
                 .setNegativeButton("Tutup", null)
                 .create();
         for (final Tab t : copy) {
+            boolean isActive = (t == active);
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(android.view.Gravity.CENTER_VERTICAL);
             row.setPadding(pad, dp(10), pad, dp(10));
+            // Card look: rounded, active tab gets a gold-ringed card.
+            android.graphics.drawable.GradientDrawable card =
+                    new android.graphics.drawable.GradientDrawable();
+            card.setCornerRadius(dp(14));
+            if (isActive) {
+                card.setColor(dark() ? 0xFF1B241F : 0xFFEAF3EB);
+                card.setStroke(dp(1), dark() ? 0xFF8A7440 : 0xFFC6A15B);
+            } else {
+                card.setColor(dark() ? 0xFF161916 : 0xFFF8F5ED);
+            }
+            row.setBackground(card);
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            rlp.setMargins(0, 0, 0, dp(8));
+            row.setLayoutParams(rlp);
 
             TextView tv = new TextView(this);
             String title = t.title.isEmpty() ? "Tab baru" : t.title;
@@ -1007,9 +1042,10 @@ public class MainActivity extends Activity {
             if (title.length() > 36) title = title.substring(0, 36) + "…";
             if (url != null && url.length() > 48)
                 url = url.substring(0, 48) + "…";
-            tv.setText((t == active ? "● " : "○ ") + title + "\n"
+            tv.setText((isActive ? "◆ " : "◇ ") + title + "\n"
                     + (url == null ? "" : url));
             tv.setTextSize(14);
+            tv.setTextColor(dark() ? 0xFFEDE8DC : 0xFF1F2A24);
             tv.setMaxLines(2);
             tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
@@ -1041,7 +1077,7 @@ public class MainActivity extends Activity {
         add.setText("＋ Tab baru");
         add.setTextSize(15);
         add.setPadding(pad, dp(12), pad, dp(12));
-        add.setTextColor(0xFF1EA446);
+        add.setTextColor(dark() ? 0xFFD4B978 : 0xFF0E5C43);
         add.setOnClickListener(v -> {
             dlg.dismiss();
             newTab(homeUrl(), false);
@@ -1051,6 +1087,7 @@ public class MainActivity extends Activity {
         sv.addView(root);
         dlg.setView(sv);
         dlg.show();
+        roundDialog(dlg);
     }
 
     private void goBack() {
@@ -1367,8 +1404,12 @@ public class MainActivity extends Activity {
             agentToast.setText(msg);
             int bg = level == 3 ? 0xDDB3261E
                     : level == 2 ? 0xDDF9AB00
-                    : level == 1 ? 0xDD137333 : 0xCC202124;
-            agentToast.setBackgroundColor(bg);
+                    : level == 1 ? 0xDD0E5C43 : 0xCC202124;
+            android.graphics.drawable.GradientDrawable tbg =
+                    (android.graphics.drawable.GradientDrawable)
+                    getResources().getDrawable(R.drawable.toast_bg).mutate();
+            tbg.setColor(bg);
+            agentToast.setBackground(tbg);
             agentToast.setVisibility(View.VISIBLE);
             toastHide.removeCallbacksAndMessages(null);
             toastHide.postDelayed(() -> agentToast.setVisibility(View.GONE),

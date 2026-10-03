@@ -11,7 +11,7 @@
         android:orientation="horizontal"
         android:padding="6dp"
         android:gravity="center_vertical"
-        android:background="?android:attr/colorBackground">
+        android:background="#FDFCF8">
 
         <ImageButton
             android:id="@+id/btn_back"
@@ -51,7 +51,7 @@
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:text="▣ 1"
             android:textSize="14sp"
-            android:textColor="#137333"
+            android:textColor="#0E5C43"
             android:contentDescription="1 tab" />
 
         <ImageButton
@@ -70,7 +70,7 @@
         android:layout_height="3dp"
         android:max="100"
         android:progress="0"
-        android:progressTint="#1EA446"
+        android:progressTint="#C6A15B"
         android:visibility="gone" />
 
     <FrameLayout
@@ -97,7 +97,9 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Halaman tidak dapat dimuat"
-                android:textSize="18sp"
+                android:fontFamily="serif"
+                android:textSize="20sp"
+                android:letterSpacing="0.02"
                 android:paddingBottom="8dp" />
 
             <TextView
@@ -152,10 +154,11 @@
                 android:id="@+id/agent_status"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginLeft="6dp"
+                android:layout_marginLeft="8dp"
                 android:text="● Agent aktif"
                 android:textSize="11sp"
-                android:textColor="#137333" />
+                android:letterSpacing="0.06"
+                android:textColor="#EDE8DC" />
         </LinearLayout>
 
         <TextView
@@ -164,7 +167,7 @@
             android:layout_height="wrap_content"
             android:layout_gravity="bottom|center_horizontal"
             android:layout_marginBottom="16dp"
-            android:background="#CC202124"
+            android:background="@drawable/toast_bg"
             android:textColor="#E8EAED"
             android:textSize="11sp"
             android:padding="10dp"
