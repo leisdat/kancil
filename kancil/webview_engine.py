@@ -295,52 +295,58 @@ class WebViewEngine:
             return "JS error for %r: %s" % (query, res[4:100])
         return None
 
+    # Deep-query shorthands (the APK injects window.__kancilQ/QA/QX;
+    # fall back to the shallow DOM calls if not injected yet).
+    _DQ = ("(window.__kancilQ||function(s){"
+           "return document.querySelector(s)})")
+    _DQA = ("(window.__kancilQA||function(s){"
+            "return document.querySelectorAll(s)})")
+    _DQX = ("(window.__kancilQX||function(x){var r=document.evaluate(x,"
+            "document,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null);"
+            "return r.singleNodeValue})")
+    _DQXA = ("(window.__kancilQXA||function(x){var r=document.evaluate(x,"
+             "document,null,XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,null);"
+             "var o=[];for(var i=0;i<r.snapshotLength;i++)"
+             "o.push(r.snapshotItem(i));return o})")
+
     def _target_js(self, query):
         """JS expression evaluating to the target element (or null).
 
         Tries, in order: CSS selector, XPath, @a11y ref (converted to CSS
         by _sel), then visible-text match (exact, then contains).
+        All strategies pierce shadow DOM + same-origin iframes via the
+        APK's __kancilQ/QX helpers (cross-origin frames unreachable).
         """
         q = self._sel(query)
         if self._is_xpath(q):
             xp = json.dumps(self._xpath_expr(q))
-            return ("(function(){var r=document.evaluate(%s,document,null,"
-                    "XPathResult.FIRST_ORDERED_NODE_TYPE,null);"
-                    "return r.singleNodeValue;})()" % xp)
+            return "%s(%s)" % (self._DQX, xp)
         qj = json.dumps(q)
         if self._looks_like_text(q):
             tq = json.dumps(q.strip())
-            return ("(function(){var el=document.querySelector(%s);"
+            return ("(function(){var el=%s(%s);"
                     "if(el)return el;"
-                    "var x=function(xp){var r=document.evaluate(xp,document,"
-                    "null,XPathResult.FIRST_ORDERED_NODE_TYPE,null);"
-                    "return r.singleNodeValue;};"
-                    "el=x(\"//*[normalize-space(.)=\"+%s+\"]\");"
+                    "el=%s(\"//*[normalize-space(.)=\"+%s+\"]\");"
                     "if(el)return el;"
-                    "return x(\"//*[contains(normalize-space(.),\"+%s+\")]\");"
-                    "})()" % (qj, tq, tq))
-        return "document.querySelector(%s)" % qj
+                    "return %s(\"//*[contains(normalize-space(.),\"+%s+\")]\");"
+                    "})()" % (self._DQ, qj, self._DQX, tq, self._DQX, tq))
+        return "%s(%s)" % (self._DQ, qj)
 
     def _count_js(self, query):
         """JS expression evaluating to the number of matching elements."""
         q = self._sel(query)
         if self._is_xpath(q):
             xp = json.dumps(self._xpath_expr(q))
-            return ("(function(){var r=document.evaluate(%s,document,null,"
-                    "XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,null);"
-                    "return r.snapshotLength})()" % xp), "xpath"
+            return "%s(%s).length" % (self._DQXA, xp), "xpath"
         qj = json.dumps(q)
-        js = ("(function(){var n=document.querySelectorAll(%s).length;"
-              "if(n>0)return n;" % qj)
+        js = ("(function(){var n=%s(%s).length;"
+              "if(n>0)return n;" % (self._DQA, qj))
         if self._looks_like_text(q):
             tq = json.dumps(q.strip())
-            js += ("var x=function(xp){var r=document.evaluate(xp,document,"
-                   "null,XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,null);"
-                   "return r.snapshotLength;};"
-                   "n=x(\"//*[normalize-space(.)=\"+%s+\"]\");"
+            js += ("n=%s(\"//*[normalize-space(.)=\"+%s+\"]\").length;"
                    "if(n>0)return n;"
-                   "return x(\"//*[contains(normalize-space(.),\"+%s+\")]\");"
-                   % (tq, tq))
+                   "return %s(\"//*[contains(normalize-space(.),\"+%s+\")]\").length;"
+                   % (self._DQXA, tq, self._DQXA, tq))
         else:
             js += "return 0;"
         return js + "})()", "webview"

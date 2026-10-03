@@ -2432,6 +2432,17 @@ class WebViewEngineTest(unittest.TestCase):
         self.assertTrue(r["idle"])
         self.assertIn("waited_ms", r)
 
+    def test_deep_query_helpers_emitted(self):
+        # element targeting must pierce shadow DOM + same-origin iframes
+        js = self.eng._target_js("#b1")
+        self.assertIn("__kancilQ", js)
+        js, _m = self.eng._count_js("#b1")
+        self.assertIn("__kancilQA", js)
+        js = self.eng._target_js("//div[@id='x']")
+        self.assertIn("__kancilQX", js)
+        js, _m = self.eng._count_js("//div[@id='x']")
+        self.assertIn("__kancilQXA", js)
+
     def test_unreachable_fails_fast(self):
         from kancil.webview_engine import WebViewEngine
         from kancil.engines import EngineError

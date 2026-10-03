@@ -114,6 +114,10 @@ Login/captcha cukup sekali di app, agent di Termux pakai session-nya terus:
 > (KeyboardEvent beneran ke element fokus), `longpress <selector>`
 > (long-press ala mobile). `click` sekarang lapor URL + title tempat mendarat.
 >
+> Query element tembus shadow DOM + iframe same-origin (rekursif) — berlaku
+> buat click/type/press/hover/wait/videos/screenshot element. Iframe
+> cross-origin nggak bisa ditembus (same-origin policy, bukan bug).
+>
 > Aman: `--dry-run` — isi form/composer sepuasnya, click/submit ke-block
 > kecuali `--confirm` (anti publish tak sengaja).
 >

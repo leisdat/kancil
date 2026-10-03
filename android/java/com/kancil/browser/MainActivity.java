@@ -709,6 +709,73 @@ public class MainActivity extends Activity {
             + "catch(e){}"
             + "})();";
 
+    // Deep query: pierce shadow DOM + same-origin iframes (recursive).
+    // Cross-origin iframes are unreachable by design (same-origin policy).
+    // Fast path first (plain querySelector), deep scan only on miss —
+    // keeps the common case cheap on huge pages (FB feed).
+    // __kancilQ(sel) -> first Element or null
+    // __kancilQA(sel) -> Array of Elements
+    // __kancilQX(xpath) -> first Node or null
+    // __kancilR(el) -> top-window rect {x,y,w,h}, crossing iframe bounds
+    private static final String DEEP_QUERY_JS =
+            "(function(){"
+            + "function docs(){var ds=[document];"
+            + "function scan(root){var els=root.querySelectorAll('*');"
+            + "for(var i=0;i<els.length;i++){var el=els[i];"
+            + "if(el.shadowRoot&&ds.indexOf(el.shadowRoot)<0)"
+            + "{ds.push(el.shadowRoot);scan(el.shadowRoot);}"
+            + "if(el.tagName==='IFRAME'){try{var d=el.contentDocument;"
+            + "if(d&&ds.indexOf(d)<0){ds.push(d);scan(d);}}catch(e){}}}}"
+            + "scan(document);return ds;}"
+            + "window.__kancilQ=function(sel){"
+            + "try{var el=document.querySelector(sel);if(el)return el;}"
+            + "catch(e){return null;}"
+            + "var ds=docs();"
+            + "for(var i=0;i<ds.length;i++){try{"
+            + "var m=ds[i].querySelector(sel);if(m)return m;}catch(e){}}"
+            + "return null;};"
+            + "window.__kancilQA=function(sel){var out=[];"
+            + "try{var nl=document.querySelectorAll(sel);"
+            + "for(var j=0;j<nl.length;j++)out.push(nl[j]);}"
+            + "catch(e){return out;}"
+            + "var ds=docs();"
+            + "for(var i=0;i<ds.length;i++){if(ds[i]===document)continue;"
+            + "try{var q=ds[i].querySelectorAll(sel);"
+            + "for(var k=0;k<q.length;k++)out.push(q[k]);}catch(e){}}"
+            + "return out;};"
+            + "window.__kancilQX=function(xpath){var ds=docs();"
+            + "for(var i=0;i<ds.length;i++){try{"
+            + "var ev=ds[i].evaluate?ds[i]:document;"
+            + "var r=ev.evaluate(xpath,ds[i],null,"
+            + "XPathResult.FIRST_ORDERED_NODE_TYPE,null);"
+            + "if(r.singleNodeValue)return r.singleNodeValue;}catch(e){}}"
+            + "return null;};"
+            + "window.__kancilQXA=function(xpath){var out=[];var ds=docs();"
+            + "for(var i=0;i<ds.length;i++){try{"
+            + "var ev=ds[i].evaluate?ds[i]:document;"
+            + "var r=ev.evaluate(xpath,ds[i],null,"
+            + "XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,null);"
+            + "for(var j=0;j<r.snapshotLength;j++)"
+            + "out.push(r.snapshotItem(j));}catch(e){}}"
+            + "return out;};"
+            + "window.__kancilR=function(el){"
+            + "var b=el.getBoundingClientRect();var x=b.left,y=b.top;"
+            + "try{var w=el.ownerDocument.defaultView;"
+            + "while(w&&w!==w.top){var fe=w.frameElement;if(!fe)break;"
+            + "var fr=fe.getBoundingClientRect();x+=fr.left;y+=fr.top;"
+            + "w=fe.ownerDocument.defaultView;}}catch(e){}"
+            + "return {x:x,y:y,w:b.width,h:b.height};};"
+            + "})();";
+
+    // Shorthands with graceful fallback if the helpers aren't injected yet.
+    private static final String DQ =
+            "(window.__kancilQ||function(s){return document.querySelector(s)})";
+    private static final String DQA =
+            "(window.__kancilQA||function(s){return document.querySelectorAll(s)})";
+    private static final String DQR =
+            "(window.__kancilR||function(el){var b=el.getBoundingClientRect();"
+            + "return {x:b.left,y:b.top,w:b.width,h:b.height}})";
+
     private boolean stealth() { return prefs.getBoolean("stealth", true); }
 
     private static WebResourceResponse emptyResponse() {        try {
@@ -1027,6 +1094,8 @@ public class MainActivity extends Activity {
                 // Stealth first: patch the JS tells before page scripts run
                 // (best effort — the context may still be warming up).
                 if (stealth()) v.evaluateJavascript(STEALTH_JS, null);
+                // Deep-query helpers for the agent (also re-injected on finish).
+                v.evaluateJavascript(DEEP_QUERY_JS, null);
                 if (tab == active) ui.post(() -> {
                     urlBar.setText(url);
                     findViewById(R.id.error_view).setVisibility(View.GONE);
@@ -1047,6 +1116,8 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView v, String url) {
+                // Deep-query helpers for the agent (idempotent re-inject).
+                v.evaluateJavascript(DEEP_QUERY_JS, null);
                 if (tab == active) ui.post(() -> {
                     urlBar.setText(url);
                     if (!tab.title.isEmpty()) setTitle(tab.title);
@@ -1329,7 +1400,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.9");
+                            oo.put("agent", "kancil-browser/1.10");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -1569,7 +1640,7 @@ public class MainActivity extends Activity {
                 }
                 case "/videos": {
                     String r = evalJs("(function(){var v=[];"
-                            + "document.querySelectorAll('video')"
+                            + DQA + "('video')"
                             + ".forEach(function(el,i){"
                             + "var src=el.currentSrc||el.src||'';"
                             + "if(!src){var s=el.querySelector('source');"
@@ -1637,7 +1708,7 @@ public class MainActivity extends Activity {
                 case "/click": {
                     String sel = body.optString("selector", query.get("selector"));
                     if (sel == null) return AgentServer.Response.err(400, "missing selector");
-                    String r = evalJs("(function(){var el=document.querySelector("
+                    String r = evalJs("(function(){var el=" + DQ + "("
                             + JSONObject.quote(sel) + ");"
                             + "if(!el) return 'not-found';"
                             + "el.scrollIntoView({block:'center'});el.click();return 'clicked'})()");
@@ -1653,7 +1724,7 @@ public class MainActivity extends Activity {
                         return AgentServer.Response.err(400, "missing selector/text");
                     // Native setter (not execCommand): works with React/Vue
                     // controlled inputs. selectAll first to replace content.
-                    String r = evalJs("(function(){var el=document.querySelector("
+                    String r = evalJs("(function(){var el=" + DQ + "("
                             + JSONObject.quote(sel) + ");if(!el) return 'not-found';"
                             + "el.focus();"
                             + "try{el.select();}catch(e){}"
@@ -1694,8 +1765,7 @@ public class MainActivity extends Activity {
                     }
                     final int kc = code;
                     String target = (sel != null && !sel.isEmpty())
-                            ? "document.querySelector("
-                                    + JSONObject.quote(sel) + ")"
+                            ? DQ + "(" + JSONObject.quote(sel) + ")"
                             : "document.activeElement||document.body";
                     String r = evalJs("(function(){var el=" + target + ";"
                             + "if(!el)return 'not-found';"
@@ -1718,17 +1788,17 @@ public class MainActivity extends Activity {
                     String sel = body.optString("selector", query.get("selector"));
                     if (sel == null)
                         return AgentServer.Response.err(400, "missing selector");
-                    String r = evalJs("(function(){var el=document.querySelector("
+                    String r = evalJs("(function(){var el=" + DQ + "("
                             + JSONObject.quote(sel) + ");"
                             + "if(!el)return 'not-found';"
-                            + "var b=el.getBoundingClientRect();"
-                            + "var t={touches:[{clientX:b.left+b.width/2,"
-                            + "clientY:b.top+b.height/2}],bubbles:true,cancelable:true};"
+                            + "var b=" + DQR + "(el);"
+                            + "var t={touches:[{clientX:b.x+b.w/2,"
+                            + "clientY:b.y+b.h/2}],bubbles:true,cancelable:true};"
                             + "el.dispatchEvent(new TouchEvent('touchstart',t));"
                             + "el.dispatchEvent(new MouseEvent('contextmenu',"
                             + "{bubbles:true,cancelable:true,"
-                            + "clientX:b.left+b.width/2,"
-                            + "clientY:b.top+b.height/2}));"
+                            + "clientX:b.x+b.w/2,"
+                            + "clientY:b.y+b.h/2}));"
                             + "el.dispatchEvent(new TouchEvent('touchend',"
                             + "{bubbles:true,cancelable:true}));"
                             + "return 'longpressed'})()");
@@ -1927,7 +1997,7 @@ public class MainActivity extends Activity {
     private byte[] elementScreenshot(String selector) throws Exception {
         String q = selector.replace("\\", "\\\\").replace("\"", "\\\"");
         String r = evalJs("(function(s){try{"
-                + "var el=document.querySelector(\"" + q + "\");"
+                + "var el=" + DQ + "(s);"
                 + "if(!el)return 'null';"
                 + "el.scrollIntoView({block:'center',inline:'center'});"
                 + "return 'ok';}"
@@ -1936,11 +2006,12 @@ public class MainActivity extends Activity {
             throw new Exception("element not found: " + selector);
         Thread.sleep(400); // let the scroll settle (worker thread)
         // Fresh rect after settling — the pre-sleep rect may be stale.
+        // __kancilR gives top-window coords (crosses iframe bounds).
         r = evalJs("(function(s){try{"
-                + "var el=document.querySelector(\"" + q + "\");"
+                + "var el=" + DQ + "(s);"
                 + "if(!el)return 'null';"
-                + "var b=el.getBoundingClientRect();"
-                + "return b.left+'|'+b.top+'|'+b.width+'|'+b.height"
+                + "var b=" + DQR + "(el);"
+                + "return b.x+'|'+b.y+'|'+b.w+'|'+b.h"
                 + "+'|'+window.innerWidth;}"
                 + "catch(e){return 'ERR:'+e.message}})(\"" + q + "\")");
         if (r == null || r.equals("null") || r.startsWith("ERR:"))
