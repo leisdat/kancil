@@ -93,9 +93,11 @@ kancil/                        # project root
 | **Stealth (sembunyikan jejak WebView)** | ❌ | ⚠️ (butuh Camoufox) | ✅ (default ON) |
 
 Engine `webview` nyambung ke aplikasi **Kancil Browser** (folder `android/`,
-APK ~90 KB) yang jalan di HP yang sama — Chromium beneran (System WebView).
+APK ~90 KB, agent 1.13) yang jalan di HP yang sama — Chromium beneran (System WebView).
 Login/captcha cukup sekali di app, agent di Termux pakai session-nya terus:
-`kancil open --engine webview https://example.com`.
+`kancil open --engine webview https://example.com`. Ada juga **pembunuh popup iklan**:
+popup otomatis (tanpa gesture) langsung diblokir, popup dari tap yang larinya ke host iklan
+langsung ditutup tab-nya.
 
 > **Webview = session-stateful: drive dari SATU proses.** Tiap `kancil ...`
 > = proses baru yang baca ulang `/status`; kalau Android me-recreate app di

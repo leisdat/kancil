@@ -86,7 +86,9 @@ the Termux agent reuses that live session. Element queries pierce shadow DOM
 + same-origin iframes (cross-origin frames are unreachable by same-origin
 policy); `click` reports the landing URL/title, `open --idle` settles the
 page like a human. Includes JS console capture,
-pattern-based request blocking (`kancil block add <pattern>`), native
+pattern-based request blocking (`kancil block add <pattern>`), popup-ad
+killer (gesture-less auto-popups blocked outright; tap-triggered popups
+closed if they navigate to an ad host), native
 full-page + element screenshots, video listing, form fill, file upload,
 download manager — all agent-controlled, zero new dependencies. A foreground
 service ("Jaga agent tetap hidup") keeps the app alive against MIUI/EMUI
