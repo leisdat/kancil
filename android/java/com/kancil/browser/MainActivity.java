@@ -124,7 +124,57 @@ public class MainActivity extends Activity {
         });
 
         startAgentServer();
-        newTab(homeUrl(), false);
+        if (!restoreTabs()) {
+            newTab(homeUrl(), false);
+        }
+    }
+
+    // ---------- tab persistence (survive process death) ----------
+    // Android kills background apps aggressively on low-RAM phones; without
+    // this, every kill wipes all tabs and the agent sees a fresh Google tab.
+
+    private void saveTabs() {
+        try {
+            JSONArray a = new JSONArray();
+            for (Tab t : tabs) {
+                String u = t.web.getUrl();
+                if (u == null || u.isEmpty()) continue;
+                JSONObject o = new JSONObject();
+                o.put("id", t.id);
+                o.put("url", u);
+                a.put(o);
+            }
+            prefs.edit()
+                    .putString("tabs", a.toString())
+                    .putInt("active_tab", active != null ? active.id : -1)
+                    .putInt("tab_seq", tabSeq)
+                    .apply();
+        } catch (Exception ignored) {}
+    }
+
+    /** @return true if tabs were restored */
+    private boolean restoreTabs() {
+        try {
+            String raw = prefs.getString("tabs", null);
+            if (raw == null) return false;
+            JSONArray a = new JSONArray(raw);
+            if (a.length() == 0) return false;
+            tabSeq = prefs.getInt("tab_seq", 0);
+            int activeId = prefs.getInt("active_tab", -1);
+            Tab toActivate = null;
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.getJSONObject(i);
+                String url = o.optString("url", "");
+                if (url.isEmpty()) continue;
+                Tab t = newTabUi(url, true);
+                if (t != null && o.getInt("id") == activeId) toActivate = t;
+            }
+            if (toActivate != null) activateTabUi(toActivate.id);
+            else if (!tabs.isEmpty()) activateTabUi(tabs.get(0).id);
+            return !tabs.isEmpty();
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     // ---------- tabs ----------
@@ -242,6 +292,7 @@ public class MainActivity extends Activity {
         else w.setVisibility(View.GONE);
         if (url != null) w.loadUrl(url);
         updateTabCount();
+        saveTabs();
         return tab;
     }
 
@@ -262,6 +313,7 @@ public class MainActivity extends Activity {
         urlBar.setText(t.web.getUrl());
         if (!t.title.isEmpty()) setTitle(t.title);
         updateTabCount();
+        saveTabs();
     }
 
     /** @return error message or null on success */
@@ -288,6 +340,7 @@ public class MainActivity extends Activity {
         if (active == t && !tabs.isEmpty())
             activateTabUi(tabs.get(tabs.size() - 1).id);
         updateTabCount();
+        saveTabs();
         return null;
     }
 
@@ -624,6 +677,7 @@ public class MainActivity extends Activity {
                 if (dark()) {
                     v.evaluateJavascript(DARK_ON, null);
                 }
+                saveTabs();
                 CookieManager.getInstance().flush();
             }
 
@@ -946,6 +1000,12 @@ public class MainActivity extends Activity {
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         bmp.compress(Bitmap.CompressFormat.PNG, 100, bos);
         return bos.toByteArray();
+    }
+
+    @Override
+    protected void onPause() {
+        saveTabs();
+        super.onPause();
     }
 
     @Override
