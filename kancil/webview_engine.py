@@ -942,6 +942,52 @@ class WebViewEngine:
         self.netlog = []
         return {"success": True}
 
+    _CLEAR_WHATS = ("tabs", "netlog")
+
+    def clear_session(self, what="all"):
+        """Wipe current session state (webview engine).
+
+        Clears tabs (all closed, one fresh blank tab) and the network log.
+        Cookies are deliberately NOT cleared: they hold your logins
+        (FB, YT, ...) and the app agent has no cookie-clear endpoint.
+        """
+        if what == "all":
+            items = list(self._CLEAR_WHATS)
+        else:
+            items = [w.strip() for w in str(what).split(",") if w.strip()]
+            bad = [w for w in items if w not in ("cookies", "tabs", "netlog", "cache")]
+            if bad:
+                return {"success": False,
+                        "errors": ["unknown clear target(s): %s" % ", ".join(bad)]}
+        cleared, skipped = [], {}
+        if "tabs" in items:
+            try:
+                tabs = self.list_tabs()
+                for t in tabs:
+                    if not t.get("current"):
+                        try:
+                            self.close_tab(t["id"])
+                        except Exception:
+                            pass
+                try:
+                    self.open("about:blank")
+                except Exception:
+                    pass
+                cleared.append("tabs")
+            except Exception as e:
+                skipped["tabs"] = "app unreachable: %s" % str(e)[:80]
+        if "netlog" in items:
+            self.network_clear()
+            cleared.append("netlog")
+        for w in ("cookies", "cache"):
+            if w in items:
+                skipped[w] = ("not supported on the webview engine "
+                             "(cookies hold your app logins)")
+        out = {"success": True, "cleared": cleared}
+        if skipped:
+            out["skipped"] = skipped
+        return out
+
     # ---------- storage (real, via WebView) ----------
 
     def forms(self):

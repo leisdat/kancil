@@ -1,5 +1,6 @@
 """Kancil test suite — stdlib unittest, local test server only."""
 import http.server
+import http.cookiejar
 import hashlib
 import json
 import os
@@ -2891,3 +2892,108 @@ class DoctorTest(unittest.TestCase):
         # exit 0 only when everything healthy; here playwright/webview fail
         self.assertIn("python", r.stdout)
         self.assertIn("static engine", r.stdout)
+
+
+def _mk_cookie(name="s", value="v", domain="example.com"):
+    return http.cookiejar.Cookie(
+        version=0, name=name, value=value, port=None, port_specified=False,
+        domain=domain, domain_specified=True, domain_initial_dot=False,
+        path="/", path_specified=True, secure=False, expires=None,
+        discard=True, comment=None, comment_url=None, rest={})
+
+
+class SessionClearTest(unittest.TestCase):
+    def test_static_clear_all(self):
+        from kancil.engines import StaticEngine
+        eng = StaticEngine(cache=False)
+        eng.jar.set_cookie(_mk_cookie())
+        eng.tabs = [{"history": ["http://example.com/"], "pos": 0}]
+        eng.cur = 0
+        eng.netlog.append({"id": 1, "url": "http://example.com/"})
+        eng._req_id = 1
+        eng.errors.append({"type": "x"})
+        r = eng.clear_session("all")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["cleared"], ["cookies", "tabs", "netlog", "cache"])
+        self.assertEqual(list(eng.jar), [])
+        self.assertEqual(eng.tabs, [{"history": [], "pos": -1}])
+        self.assertEqual(eng.cur, 0)
+        self.assertEqual(eng.netlog, [])
+        self.assertEqual(eng._req_id, 0)
+        self.assertEqual(eng.errors, [])
+
+    def test_static_clear_subset(self):
+        from kancil.engines import StaticEngine
+        eng = StaticEngine(cache=False)
+        eng.jar.set_cookie(_mk_cookie())
+        eng.tabs = [{"history": ["http://example.com/"], "pos": 0}]
+        eng.netlog.append({"id": 1})
+        r = eng.clear_session("cookies")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["cleared"], ["cookies"])
+        self.assertEqual(list(eng.jar), [])
+        # tabs & netlog untouched
+        self.assertEqual(len(eng.tabs[0]["history"]), 1)
+        self.assertEqual(len(eng.netlog), 1)
+
+    def test_static_clear_invalid(self):
+        from kancil.engines import StaticEngine
+        eng = StaticEngine(cache=False)
+        r = eng.clear_session("nope")
+        self.assertFalse(r["success"])
+        self.assertIn("unknown clear target", r["errors"][0])
+
+    def test_static_clear_cache(self):
+        from kancil.engines import StaticEngine
+        from kancil import httpcache
+        eng = StaticEngine(cache=False)
+        httpcache.store("http://example.com/x", "http://example.com/x", 200,
+                        {"Content-Type": "text/html",
+                         "ETag": '"t1"', "Last-Modified": "today"},
+                        b"hello")
+        meta, body = httpcache.lookup("http://example.com/x")
+        self.assertIsNotNone(meta)
+        eng.clear_session("cache")
+        self.assertEqual(httpcache.lookup("http://example.com/x"), (None, None))
+
+    def test_api_session_clear(self):
+        from kancil.api import Kancil
+        k = Kancil(engine="static", cache=False)
+        k.engine.jar.set_cookie(_mk_cookie())
+        r = k.session_clear()
+        self.assertTrue(r["success"], r)
+        self.assertEqual(list(k.engine.jar), [])
+
+    def test_cli_session_clear_parses(self):
+        from kancil import cli as cli_mod
+        p = cli_mod.build_parser()
+        args = p.parse_args(["session", "clear", "--what", "cookies"])
+        self.assertEqual(args.cmd, "session")
+        self.assertEqual(args.action, "clear")
+        self.assertEqual(args.what, "cookies")
+
+    def test_webview_clear_mock(self):
+        from kancil.webview_engine import WebViewEngine
+        eng = WebViewEngine.__new__(WebViewEngine)
+        calls = []
+
+        def fake_list_tabs():
+            return [{"id": 1, "current": True}, {"id": 2, "current": False}]
+        eng.list_tabs = fake_list_tabs
+        eng.close_tab = lambda i: calls.append(("close", i)) or {"success": True}
+        eng.open = lambda u: calls.append(("open", u)) or {"success": True}
+        eng.netlog = [{"id": 1}]
+        eng.network_clear = lambda: calls.append(("netclear",)) or setattr(
+            eng, "netlog", []) or {"success": True}
+
+        r = eng.clear_session("all")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["cleared"], ["tabs", "netlog"])
+        self.assertIn(("close", 2), calls)
+        self.assertIn(("open", "about:blank"), calls)
+        self.assertEqual(eng.netlog, [])
+
+        r = eng.clear_session("cookies,cache")
+        self.assertTrue(r["success"], r)
+        self.assertIn("cookies", r["skipped"])
+        self.assertIn("cache", r["skipped"])

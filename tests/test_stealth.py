@@ -210,6 +210,17 @@ class TestImpersonatedTransport(StealthServer):
         self.assertEqual(r["status"], 200)
         self.assertEqual(r["title"], "T")
 
+    def test_clear_session_cookies(self):
+        eng = StaticEngine(impersonate="chrome")
+        eng.fetch(self.url("/cookie"))
+        self.assertTrue(list(eng.jar))
+        r = eng.clear_session("cookies")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(list(eng.jar), [])
+        # impersonated session jar cleared too: no Cookie header next fetch
+        _, _, _, raw, _ = eng.fetch(self.url("/echo-cookie"))
+        self.assertNotIn(b"sess=", raw)
+
 
 class TestFallbackWithoutCffi(unittest.TestCase):
     def test_fallback_to_urllib(self):

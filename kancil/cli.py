@@ -317,8 +317,13 @@ def build_parser():
     cr.add_argument("--external", action="store_true")
 
     se = SP("session", help="sessions")
-    se.add_argument("action", choices=["save", "load", "list", "delete", "info"])
+    se.add_argument("action", choices=["save", "load", "list", "delete", "info",
+                                       "clear"])
     se.add_argument("name", nargs="?")
+    se.add_argument("--what", default="all",
+                    help="session clear targets: all (default) or comma "
+                         "separated subset of cookies,tabs,netlog,cache "
+                         "(support varies per engine)")
 
     ha = SP("har", help="HAR recording session")
     ha.add_argument("action", choices=["start", "stop", "export", "clear", "stats"])
@@ -713,6 +718,8 @@ def dispatch(b, args):
             return b.session_delete(args.name)
         if args.action == "info":
             return b.session_info(args.name)
+        if args.action == "clear":
+            return b.session_clear(getattr(args, "what", "all") or "all")
         return b.session_list()
     if c == "har":
         if args.action == "start":

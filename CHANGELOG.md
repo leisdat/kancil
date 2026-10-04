@@ -20,6 +20,10 @@
   curl_cffi + daftar profil).
 - `click(..., verify=...)`: pola validator ala Artemis — klik bisa
   memverifikasi selector yang harus muncul sesudahnya.
+- **`kancil session clear`** (`--what all|cookies,tabs,netlog,cache`):
+  wipe state sesi berjalan. Static engine: cookies (termasuk jar sesi
+  impersonasi), tab, netlog, cache. Webview: tab + netlog (cookies sengaja
+  tidak disentuh — isinya login FB/YT).
 
 ### Notes
 - 230 unit tests hijau (23 baru: modul stealth + wiring API/CLI).

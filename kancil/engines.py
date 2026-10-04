@@ -535,6 +535,62 @@ class StaticEngine:
         self._build_opener()
         return {"success": True, "proxy": self.proxy}
 
+    _CLEAR_WHATS = ("cookies", "tabs", "netlog", "cache")
+
+    def clear_session(self, what="all"):
+        """Wipe current session state. what: all (default) or a comma
+        separated subset of cookies,tabs,netlog,cache."""
+        if what == "all":
+            items = list(self._CLEAR_WHATS)
+        else:
+            items = [w.strip() for w in str(what).split(",") if w.strip()]
+            bad = [w for w in items if w not in self._CLEAR_WHATS]
+            if bad:
+                return {"success": False,
+                        "errors": ["unknown clear target(s): %s (choose from %s)"
+                                   % (", ".join(bad),
+                                      "all, " + ", ".join(self._CLEAR_WHATS))]}
+        cleared = []
+        if "cookies" in items:
+            try:
+                self.jar.clear()
+            except Exception:
+                pass
+            try:
+                if isinstance(self.opener, _stealth.ImpersonatedOpener):
+                    self.opener.session.cookies.clear()
+            except Exception:
+                pass
+            try:
+                if isinstance(self.jar, http.cookiejar.LWPCookieJar):
+                    self.jar.save(ignore_discard=True)
+            except Exception:
+                pass
+            cleared.append("cookies")
+        if "tabs" in items:
+            self.tabs = [{"history": [], "pos": -1}]
+            self.cur = 0
+            self._a11y_refs = {}
+            self._a11y_sig = None
+            self._a11y_css = {}
+            self._a11y_pending = ({}, None)
+            self._ls = {}
+            self._ss = {}
+            cleared.append("tabs")
+        if "netlog" in items:
+            self.netlog = []
+            self._req_id = 0
+            self._page_req_mark = 0
+            cleared.append("netlog")
+        if "cache" in items:
+            try:
+                httpcache.clear()
+            except Exception:
+                pass
+            cleared.append("cache")
+        self.errors = []
+        return {"success": True, "cleared": cleared}
+
     def set_user_agent(self, ua):
         self.ua = ua or UA_DEFAULT
         return {"success": True, "ua": self.ua[:60]}
