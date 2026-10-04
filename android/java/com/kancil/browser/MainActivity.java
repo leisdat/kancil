@@ -62,6 +62,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class MainActivity extends Activity {
@@ -77,6 +78,8 @@ public class MainActivity extends Activity {
                 java.util.Collections.synchronizedList(new java.util.ArrayList<>());
         String title = "";
         String defaultUA = "";
+        /** Agent-set UA override (/ua/set); empty = use defaultUA. */
+        String customUA = "";
         /** True if this tab was spawned by window.open / target=_blank. */
         boolean popup = false;
         Tab(int id, WebView web) { this.id = id; this.web = web; }
@@ -381,8 +384,9 @@ public class MainActivity extends Activity {
     private void applyToggles(Tab tab) {
         WebSettings s = tab.web.getSettings();
         s.setBlockNetworkImage(dataSaver());
-        String ua = tab.defaultUA.isEmpty()
-                ? s.getUserAgentString() : tab.defaultUA;
+        String ua = !tab.customUA.isEmpty() ? tab.customUA
+                : (tab.defaultUA.isEmpty()
+                        ? s.getUserAgentString() : tab.defaultUA);
         if (desktop()) {
             // turn the mobile UA into a desktop one, keeping the version
             ua = ua.replace("; Mobile", "").replace("Mobile ", "")
@@ -1773,7 +1777,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.17");
+                            oo.put("agent", "kancil-browser/1.18");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -2307,6 +2311,88 @@ public class MainActivity extends Activity {
                         return null;
                     });
                     return ok();
+                }
+                case "/cookies/set": {
+                    String cname = body.optString("name", "");
+                    String cval = body.optString("value", "");
+                    if (cname.isEmpty())
+                        return AgentServer.Response.err(400, "missing name");
+                    String cdom = body.optString("domain", query.get("domain"));
+                    if (cdom == null || cdom.isEmpty()) {
+                        String u = uiGet(() -> activeWeb().getUrl());
+                        try { cdom = u == null ? "" : Uri.parse(u).getHost(); }
+                        catch (Exception e) { cdom = ""; }
+                    }
+                    if (cdom == null || cdom.isEmpty())
+                        return AgentServer.Response.err(400, "missing domain");
+                    String cpath = body.optString("path", "/");
+                    long maxAge = body.optLong("maxAge", 0);
+                    final String fDom = cdom;
+                    final String cookie = cname + "=" + cval + "; Path=" + cpath
+                            + (maxAge > 0 ? "; Max-Age=" + maxAge : "");
+                    uiGet(() -> {
+                        CookieManager cm = CookieManager.getInstance();
+                        cm.setCookie("https://" + fDom, cookie);
+                        cm.setCookie("http://" + fDom, cookie);
+                        cm.flush();
+                        return null;
+                    });
+                    JSONObject ocs = new JSONObject();
+                    ocs.put("ok", true); ocs.put("domain", fDom);
+                    return AgentServer.Response.json(ocs);
+                }
+                case "/ua/set": {
+                    String ua = body.optString("ua", query.get("ua"));
+                    if (ua == null || ua.isEmpty())
+                        return AgentServer.Response.err(400, "missing ua");
+                    final String fUa = ua;
+                    uiGet(() -> {
+                        active.customUA = fUa;
+                        applyToggles(active);
+                        return null;
+                    });
+                    return ok();
+                }
+                case "/ua/reset": {
+                    uiGet(() -> {
+                        active.customUA = "";
+                        applyToggles(active);
+                        return null;
+                    });
+                    return ok();
+                }
+                case "/find": {
+                    String text = body.optString("text", query.get("text"));
+                    if (text == null || text.isEmpty())
+                        return AgentServer.Response.err(400, "missing text");
+                    final String fText = text;
+                    final boolean next = body.optBoolean("next", false);
+                    final AtomicInteger matches = new AtomicInteger(-1);
+                    final CountDownLatch fdl = new CountDownLatch(1);
+                    ui.post(() -> {
+                        WebView w = activeWeb();
+                        w.setFindListener(new WebView.FindListener() {
+                            @Override
+                            public void onFindResultReceived(int activeMatch,
+                                    int numberOfMatches, boolean done) {
+                                if (done) {
+                                    matches.set(numberOfMatches);
+                                    fdl.countDown();
+                                }
+                            }
+                        });
+                        w.findAllAsync(fText);
+                    });
+                    try { fdl.await(10, TimeUnit.SECONDS); }
+                    catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                    if (next && matches.get() > 0)
+                        ui.post(() -> activeWeb().findNext(true));
+                    JSONObject of = new JSONObject();
+                    of.put("ok", true);
+                    of.put("matches", matches.get());
+                    return AgentServer.Response.json(of);
                 }
                 case "/screenshot": {
                     byte[] png = screenshot();

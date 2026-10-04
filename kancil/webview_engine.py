@@ -963,6 +963,55 @@ class WebViewEngine:
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
+    def cookies_set(self, name, value="", domain=None, path="/", max_age=0):
+        """Set a cookie in the WebView (session injection). Needs agent 1.18+."""
+        if not name:
+            return {"success": False, "errors": ["missing name"]}
+        try:
+            r = self._post("/cookies/set", {
+                "name": name, "value": value,
+                "domain": domain or "", "path": path or "/",
+                "maxAge": max_age or 0})
+            if isinstance(r, dict) and r.get("ok"):
+                return {"success": True, "name": name,
+                        "domain": r.get("domain", domain or "")}
+            return {"success": False,
+                    "errors": [str(r)[:200] if isinstance(r, dict)
+                               else "bad response"]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def set_user_agent(self, ua):
+        """Override the active tab's UA (agent 1.18+). Persists for the tab
+        until reset_user_agent() or tab close."""
+        try:
+            r = self._post("/ua/set", {"ua": ua or ""})
+            if isinstance(r, dict) and r.get("ok"):
+                return {"success": True, "ua": (ua or "")[:80]}
+            return {"success": False, "errors": ["agent rejected UA override"]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def reset_user_agent(self):
+        try:
+            self._post("/ua/reset", {})
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def find(self, text, next=False):
+        """Find-in-page: highlight matches, return match count."""
+        if not text:
+            return {"success": False, "errors": ["missing text"]}
+        try:
+            r = self._post("/find", {"text": text, "next": bool(next)})
+            if isinstance(r, dict) and r.get("ok"):
+                return {"success": True, "text": text,
+                        "matches": r.get("matches", -1)}
+            return {"success": False, "errors": ["find failed"]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
     _CLEAR_WHATS = ("cookies", "tabs", "netlog", "cache")
 
     def clear_session(self, what="all", domain=None):
@@ -1178,9 +1227,6 @@ class WebViewEngine:
 
     def set_proxy(self, url):
         raise EngineError("proxy must be set in the app (not supported v1)")
-
-    def set_user_agent(self, ua):
-        raise EngineError("user-agent must be set in the app (not supported v1)")
 
     def save_storage_state(self, path):
         raise EngineError("use the app's own session (WebView profile)")

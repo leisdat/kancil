@@ -611,6 +611,69 @@ class StaticEngine:
         self.errors = []
         return {"success": True, "cleared": cleared}
 
+    def cookies_set(self, name, value="", domain=None, path="/", max_age=0):
+        """Set a cookie programmatically (session injection)."""
+        if not name:
+            return {"success": False, "errors": ["missing name"]}
+        if not domain:
+            try:
+                p = self.page
+                url = p.url if p is not None and not isinstance(p, str) else ""
+                domain = urllib.parse.urlparse(url).netloc.split(":")[0]
+            except Exception:
+                domain = ""
+        if not domain:
+            return {"success": False,
+                    "errors": ["missing domain (no page open to infer from)"]}
+        expires = int(time.time()) + int(max_age) if max_age else None
+        ck = http.cookiejar.Cookie(
+            version=0, name=name, value=value, port=None, port_specified=False,
+            domain=domain, domain_specified=True, domain_initial_dot=False,
+            path=path or "/", path_specified=True, secure=False,
+            expires=expires, discard=(expires is None),
+            comment=None, comment_url=None, rest={})
+        try:
+            self.jar.set_cookie(ck)
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:120]]}
+        try:
+            if isinstance(self.jar, http.cookiejar.LWPCookieJar):
+                self.jar.save(ignore_discard=True)
+        except Exception:
+            pass
+        return {"success": True, "name": name, "domain": domain}
+
+    def find(self, text, next=False):
+        """Find-in-page on the static engine: search rendered page text."""
+        if not text:
+            return {"success": False, "errors": ["missing text"]}
+        p = self.page
+        if p is None:
+            return {"success": False, "errors": ["no page open"]}
+        try:
+            body = p.text if hasattr(p, "text") else ""
+        except Exception:
+            body = ""
+        low, needle = body.lower(), text.lower()
+        count, idx, hits = 0, 0, []
+        while True:
+            idx = low.find(needle, idx)
+            if idx < 0 or len(hits) >= 5:
+                break
+            count += 1
+            s = max(0, idx - 40)
+            hits.append(body[s:s + 80].replace("\n", " "))
+            idx += len(needle)
+        # count remaining without storing
+        while True:
+            idx = low.find(needle, idx)
+            if idx < 0:
+                break
+            count += 1
+            idx += len(needle)
+        return {"success": True, "text": text, "matches": count,
+                "snippets": hits}
+
     def set_user_agent(self, ua):
         self.ua = ua or UA_DEFAULT
         return {"success": True, "ua": self.ua[:60]}

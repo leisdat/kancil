@@ -351,8 +351,22 @@ def build_parser():
     px.add_argument("url", nargs="?")
 
     ua = SP("ua", help="user-agent")
-    ua.add_argument("action", choices=["show", "set", "rotate", "list"])
+    ua.add_argument("action", choices=["show", "set", "rotate", "list", "reset"])
     ua.add_argument("value", nargs="?")
+
+    ck = SP("cookies", help="cookies: list, set (session injection), clear")
+    ck.add_argument("action", choices=["list", "set", "clear"], nargs="?",
+                    default="list")
+    ck.add_argument("name", nargs="?")
+    ck.add_argument("value", nargs="?", default="")
+    ck.add_argument("--domain", default=None)
+    ck.add_argument("--path", default="/")
+    ck.add_argument("--max-age", type=int, default=0)
+
+    fk = SP("find", help="find text in the current page")
+    fk.add_argument("text")
+    fk.add_argument("--next", action="store_true",
+                    help="webview: jump to the next match")
 
     stl = SP("stealth", help="browser impersonation / anti-detect")
     stl.add_argument("action", choices=["status", "impersonate", "apply"],
@@ -779,7 +793,23 @@ def dispatch(b, args):
             return b.ua_rotate()
         if args.action == "list":
             return b.ua_list()
+        if args.action == "reset":
+            return b.ua_reset()
         return b.ua_show()
+    if c == "cookies":
+        if args.action == "set":
+            if not args.name:
+                return {"success": False,
+                        "errors": ["usage: kancil cookies set <name> [value] "
+                                   "[--domain h] [--path /] [--max-age s]"]}
+            return b.cookies_set(args.name, args.value or "",
+                                 domain=args.domain, path=args.path,
+                                 max_age=args.max_age)
+        if args.action == "clear":
+            return b.session_clear("cookies", domain=args.domain)
+        return b.cookies()
+    if c == "find":
+        return b.find(args.text, next=getattr(args, "next", False))
     if c == "stealth":
         if args.action == "impersonate":
             if not args.profile:

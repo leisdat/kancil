@@ -3013,3 +3013,73 @@ class SessionClearTest(unittest.TestCase):
         self.assertEqual(r["cleared"], ["cookies(example.com)"])
         names = sorted(c.name for c in eng.jar)
         self.assertEqual(names, ["b"])
+
+
+class AgentPowerTest(unittest.TestCase):
+    def test_static_cookies_set_and_find(self):
+        from kancil.engines import StaticEngine
+        eng = StaticEngine(cache=False)
+        r = eng.cookies_set("sess", "abc", domain="example.com")
+        self.assertTrue(r["success"], r)
+        self.assertEqual([c.name for c in eng.jar], ["sess"])
+        # cookies_set without domain needs a page; error is clean
+        r2 = StaticEngine(cache=False).cookies_set("x", "y")
+        self.assertFalse(r2["success"])
+
+    def test_static_find(self):
+        from kancil.engines import StaticEngine
+        eng = StaticEngine(cache=False)
+        r = eng.find("hello")
+        self.assertFalse(r["success"])  # no page open
+        eng.tabs = [{"history": [], "pos": -1}]
+        from kancil.engines import Page
+        pg = Page("http://example.com/", 200,
+                  b"<html><body>Hello world, hello again</body></html>",
+                  "text/html")
+        eng.tabs[0]["history"] = [pg]
+        eng.tabs[0]["pos"] = 0
+        r = eng.find("hello")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["matches"], 2)
+        self.assertTrue(r["snippets"])
+
+    def test_webview_power_mock(self):
+        from kancil.webview_engine import WebViewEngine
+        eng = WebViewEngine.__new__(WebViewEngine)
+        calls = []
+        eng._post = lambda p, b: calls.append((p, b)) or {"ok": True,
+                                                          "matches": 3,
+                                                          "domain": "example.com"}
+        r = eng.cookies_set("sess", "abc", domain="example.com")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(calls[-1][0], "/cookies/set")
+        self.assertEqual(calls[-1][1]["name"], "sess")
+        r = eng.set_user_agent("TestUA/1.0")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(calls[-1][0], "/ua/set")
+        r = eng.reset_user_agent()
+        self.assertTrue(r["success"], r)
+        self.assertEqual(calls[-1][0], "/ua/reset")
+        r = eng.find("hello")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["matches"], 3)
+
+    def test_api_power(self):
+        from kancil.api import Kancil
+        k = Kancil(engine="static", cache=False)
+        r = k.cookies_set("a", "b", domain="example.com")
+        self.assertTrue(r["success"], r)
+        r = k.ua_reset()
+        self.assertTrue(r["success"], r)
+
+    def test_cli_power_parses(self):
+        from kancil import cli as cli_mod
+        p = cli_mod.build_parser()
+        a = p.parse_args(["cookies", "set", "sess", "abc",
+                          "--domain", "example.com"])
+        self.assertEqual((a.cmd, a.action, a.name, a.domain),
+                         ("cookies", "set", "sess", "example.com"))
+        a = p.parse_args(["find", "hello"])
+        self.assertEqual((a.cmd, a.text), ("find", "hello"))
+        a = p.parse_args(["ua", "reset"])
+        self.assertEqual((a.cmd, a.action), ("ua", "reset"))

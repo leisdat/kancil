@@ -29,6 +29,14 @@
 - **APK agent 1.17**: endpoint baru `/cookies/clear` (semua atau per-domain)
   dan `/cache/clear` — dipakai `WebViewEngine.cookies_clear()` /
   `cache_clear()`.
+- **APK agent 1.18 — full-power agent**: `/cookies/set` (injeksi sesi:
+  name/value/domain/path/maxAge), `/ua/set` + `/ua/reset` (override UA per
+  tab), `/find` (find-in-page: highlight + jumlah match, `next` untuk lompat).
+  Python: `WebViewEngine.cookies_set/set_user_agent/reset_user_agent/find`,
+  `StaticEngine.cookies_set/find` (find static: hitung + snippet dari teks
+  halaman), API `cookies_set/ua_reset/find`, CLI `kancil cookies
+  <list|set|clear>`, `kancil find <text> [--next]`, `kancil ua reset`
+  (`ua set` kini juga jalan di webview).
 
 ### Notes
 - 230 unit tests hijau (23 baru: modul stealth + wiring API/CLI).

@@ -482,6 +482,36 @@ class Kancil:
             pass
         return ok(imported=n, file=path)
 
+    def cookies_set(self, name, value="", domain=None, path="/", max_age=0):
+        """Set one cookie (session injection). Works on static + webview."""
+        fn = getattr(self.engine, "cookies_set", None)
+        if not fn:
+            return {"success": False,
+                    "errors": ["engine %s does not support cookies_set"
+                               % self.engine.name]}
+        return self._wrap(fn(name, value, domain=domain, path=path,
+                             max_age=max_age))
+
+    def ua_reset(self):
+        """Reset UA override (webview: active tab back to default)."""
+        self.ua = None
+        fn = getattr(self.engine, "reset_user_agent", None)
+        if fn:
+            return self._wrap(fn())
+        fn2 = getattr(self.engine, "set_user_agent", None)
+        if fn2:
+            return self._wrap(fn2(None))
+        return ok(ua=None)
+
+    def find(self, text, next=False):
+        """Find-in-page: match count (+snippets on static, highlight on webview)."""
+        fn = getattr(self.engine, "find", None)
+        if not fn:
+            return {"success": False,
+                    "errors": ["engine %s does not support find"
+                               % self.engine.name]}
+        return self._wrap(fn(text, next=next))
+
     def storage(self, kind="local"):
         data = self.engine.storage(kind) or {}
         return ok(kind=kind, origin=self.engine._origin(),
