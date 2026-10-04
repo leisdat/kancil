@@ -3280,3 +3280,152 @@ class VerifyPatternTest(unittest.TestCase):
         self.assertEqual(a.verify, "#done")
         a = p.parse_args(["type", "#q", "hi", "--verify", ".suggest"])
         self.assertEqual(a.verify, ".suggest")
+
+class WebViewLaunchTest(unittest.TestCase):
+    """Auto-heal: ensure_alive() is the single relaunch core (unified);
+    the engine auto-calls it on init and on mid-session connect errors."""
+
+    def _eng(self, **kw):
+        from kancil.webview_engine import WebViewEngine
+        eng = WebViewEngine.__new__(WebViewEngine)
+        eng.host, eng.port = "127.0.0.1", 18080
+        eng.base = "http://127.0.0.1:18080"
+        eng.timeout = 5
+        eng.errors, eng.netlog = [], []
+        eng.cur = 0
+        eng.auto_launch = kw.get("auto_launch", True)
+        eng._healing = False
+        eng._page_cache, eng._page_url = None, None
+        return eng
+
+    def test_ensure_alive_no_am(self):
+        eng = self._eng()
+        r = eng.ensure_alive()
+        self.assertFalse(r["success"])  # no `am` on this VM
+
+    def test_ensure_alive_relaunches_mock(self):
+        import subprocess as sp
+        eng = self._eng()
+        real_run = sp.run
+        calls = []
+        def fake_run(*a, **k):
+            calls.append(a[0])
+            class P:
+                returncode = 0
+            return P()
+        sp.run = fake_run
+        n = {"i": 0}
+        def fake_get(path):
+            n["i"] += 1
+            if n["i"] == 1:
+                raise Exception("refused")
+            return {"ok": True, "agent": "kancil-browser/1.21"}
+        eng._get = fake_get
+        try:
+            r = eng.ensure_alive(wait=0.1)
+        finally:
+            sp.run = real_run
+        self.assertTrue(r["success"], r)
+        self.assertTrue(r["relaunched"])
+        self.assertEqual(calls[0][:3], ["am", "start", "-n"])
+        self.assertIn("MainActivity", calls[0][3])
+
+    def test_ensure_alive_no_recursion(self):
+        # _req hook -> ensure_alive -> _get -> _req must terminate,
+        # not recurse forever
+        import urllib.request
+        import urllib.error
+        from kancil.engines import EngineError
+        eng = self._eng()
+        real = urllib.request.urlopen
+        urllib.request.urlopen = lambda req, timeout=None: (
+            _ for _ in ()).throw(urllib.error.URLError("refused"))
+        try:
+            with self.assertRaises(EngineError):
+                eng._get("/status")
+        finally:
+            urllib.request.urlopen = real
+
+    def test_init_auto_launch_recovers(self):
+        eng = self._eng()
+        eng._status_or_none = lambda: {"ok": True, "tab": 7}
+        st = eng._status_or_none()
+        if st is None and eng.auto_launch:
+            st = None
+        self.assertIsNotNone(st)
+        self.assertEqual(st["tab"], 7)
+
+    def test_init_no_auto_launch_raises(self):
+        from kancil.webview_engine import WebViewEngine, EngineError
+        with self.assertRaises(EngineError):
+            WebViewEngine(port=18082, timeout=2, auto_launch=False)
+
+    def test_req_relaunch_on_refused(self):
+        import urllib.request
+        import urllib.error
+        eng = self._eng()
+        heals = []
+        eng.ensure_alive = lambda *a, **k: heals.append(1) or {
+            "success": True}
+        eng.sync_tab = lambda: {"success": True}
+        eng._invalidate = lambda: None
+        calls = {"n": 0}
+        real = urllib.request.urlopen
+        def fake(req, timeout=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise urllib.error.URLError("refused")
+            class R:
+                def read(self):
+                    return b'{"ok": true}'
+                @property
+                def headers(self):
+                    return {"Content-Type": "application/json"}
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+            return R()
+        urllib.request.urlopen = fake
+        try:
+            r = eng._get("/status")
+        finally:
+            urllib.request.urlopen = real
+        self.assertEqual(r, {"ok": True})
+        self.assertEqual(heals, [1])
+        self.assertEqual(calls["n"], 2)
+
+    def test_req_no_relaunch_when_disabled(self):
+        import urllib.request
+        import urllib.error
+        from kancil.engines import EngineError
+        eng = self._eng(auto_launch=False)
+        heals = []
+        eng.ensure_alive = lambda *a, **k: heals.append(1) or {
+            "success": True}
+        real = urllib.request.urlopen
+        urllib.request.urlopen = lambda req, timeout=None: (
+            _ for _ in ()).throw(urllib.error.URLError("refused"))
+        try:
+            with self.assertRaises(EngineError):
+                eng._get("/status")
+        finally:
+            urllib.request.urlopen = real
+        self.assertEqual(heals, [])
+
+    def test_api_ensure_alive(self):
+        from kancil.api import Kancil
+        k = Kancil.__new__(Kancil)
+        k.engine = self._eng()
+        k._wrap = lambda r: r
+        r = k.ensure_alive()
+        self.assertFalse(r["success"])  # no `am` on this VM
+        r = k.launch_app()  # backward-compat alias
+        self.assertFalse(r["success"])
+        k.engine = object()
+        r = k.ensure_alive()
+        self.assertFalse(r["success"])
+
+    def test_cli_launch_parses(self):
+        from kancil import cli as cli_mod
+        p = cli_mod.build_parser()
+        a = p.parse_args(["--engine", "webview", "launch"])
+        self.assertEqual(a.cmd, "launch")

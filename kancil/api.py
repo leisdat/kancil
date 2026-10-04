@@ -34,7 +34,7 @@ class Kancil:
                  pw_session=None, pw_browser="chromium",
                  pw_executable_path=None, cache=True,
                  webview_host=None, webview_port=None, dry_run=False,
-                 impersonate=None):
+                 impersonate=None, webview_auto_launch=True):
         self.profile = profile or {}
         self.proxy = proxy
         self.ua = ua
@@ -46,6 +46,7 @@ class Kancil:
         self.pw_executable_path = pw_executable_path
         self.webview_host = webview_host
         self.webview_port = webview_port
+        self.webview_auto_launch = webview_auto_launch
         self.bookmarks = []
         self._bm_id = 0
         self._engine_name = engine
@@ -73,6 +74,7 @@ class Kancil:
             if self.webview_port:
                 kw["port"] = self.webview_port
             kw["dry_run"] = self.dry_run
+            kw["auto_launch"] = self.webview_auto_launch
             return WebViewEngine(**kw)
         return engines.StaticEngine(timeout=timeout, retries=retries,
                                     cookie_file=cookie_file,
@@ -1018,6 +1020,20 @@ class Kancil:
         after every navigation."""
         from . import stealth as _st
         return self._wrap(_st.apply_stealth(self.engine))
+
+    def ensure_alive(self, retries=2, relaunch=True):
+        """Check the agent is reachable; relaunch the app if dead
+        (webview engine only)."""
+        fn = getattr(self.engine, "ensure_alive", None)
+        if not fn:
+            return {"success": False,
+                    "errors": ["engine %s has no app to relaunch"
+                               % getattr(self.engine, "name", "?")]}
+        return self._wrap(fn(retries=retries, relaunch=relaunch))
+
+    # backward-compat alias (was the auto-launch entry point)
+    def launch_app(self, timeout=20):
+        return self.ensure_alive()
 
     # ---------- session ----------
     def session_clear(self, what="all", domain=None):

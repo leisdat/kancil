@@ -144,6 +144,9 @@ JavaScript, dan network log per tab — tanpa perlu agent. Tombol fullscreen vid
 > Pola validator (Artemis): `click/type/open --verify <selector>` — aksi
 > cuma dihitung tuntas kalau efeknya beneran muncul di halaman.
 >
+> Self-heal: kalau APK mati, agent otomatis `am start` buat nyalain ulang
+> (`launch` buat manual, `--no-auto-launch` buat matiin).
+>
 > Polish: `press Enter` otomatis submit form beneran kalau synthetic key-nya
 > nggak ngapa-ngapain (cek: nggak ada navigasi + request baru); `har export`
 > narik netlog dari APK dulu biar nggak kosong; `open()` re-sync tab ID kalau

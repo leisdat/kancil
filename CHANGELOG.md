@@ -14,6 +14,11 @@
   render widget, token keisi, submit kedua pass; `type_verified()` — type()
   + verify nilai beneran nempel (anti React controlled-input drop).
 - Unit tests untuk semua helper baru (15 test).
+- **Auto-heal otomatis**: `ensure_alive()` kini dipanggil otomatis oleh engine
+  — saat init dan setiap request yang gagal connect (sekali per request,
+  dengan guard anti-rekursi) — plus re-sync tab setelah relaunch. CLI
+  `kancil --engine webview launch`, flag `--no-auto-launch` untuk opt-out,
+  API `Kancil.ensure_alive()` / `webview_auto_launch=False`.
 
 ## 3.14.0
 

@@ -53,6 +53,10 @@ class WebViewEngine:
         self.errors = []
         self.netlog = []
         self.cur = 0
+        # auto_launch: when the agent is unreachable, try `am start` to
+        # (re)launch the app instead of failing immediately.
+        self.auto_launch = bool(kwargs.get("auto_launch", True))
+        self._healing = False  # re-entrancy guard for ensure_alive/_req
         self._hist = {}  # tab_id -> {"history": [], "pos": -1}
         self._a11y_refs = {}
         self._a11y_sig = None
@@ -64,20 +68,23 @@ class WebViewEngine:
         # clicks and form submits unless confirm=True is passed explicitly.
         # Guards against an agent accidentally publishing (e.g. FB composer).
         self.dry_run = bool(kwargs.get("dry_run", False))
-        # fail fast with a clear message when the app isn't running
-        try:
-            st = self._get("/status")
-            if not st.get("ok"):
-                raise Exception("bad /status response")
-            self.cur = st.get("tab", 0)
-        except Exception as e:
+        # fail fast with a clear message when the app isn't running;
+        # with auto_launch, try starting it first (agent self-heal).
+        st = self._status_or_none()
+        if st is None and self.auto_launch:
+            if self.ensure_alive().get("success"):
+                st = self._status_or_none()
+                if st is not None:
+                    self.cur = st.get("tab", 0)
+        if st is None:
             raise EngineError(
                 "webview agent unreachable at %s — open the Kancil Browser "
-                "app on this phone first (%s)" % (self.base, str(e)[:120]))
+                "app on this phone first (auto-launch %s)" %
+                (self.base, "tried" if self.auto_launch else "disabled"))
 
     # ---------- transport ----------
 
-    def _req(self, method, path, body=None):
+    def _req(self, method, path, body=None, _relaunched=False):
         url = self.base + path
         data = None
         headers = {}
@@ -104,12 +111,38 @@ class WebViewEngine:
                 pass
             raise EngineError("webview agent %s %s: HTTP %d"
                               % (method, path, e.code))
+        except (urllib.error.URLError, ConnectionError, OSError) as e:
+            # connection-level failure (app killed / not started). HTTPError
+            # is a URLError subclass but means the agent IS up, so it is
+            # handled above and never reaches here.
+            if (self.auto_launch and not _relaunched
+                    and not getattr(self, "_healing", False)):
+                if self.ensure_alive().get("success"):
+                    try:
+                        self.sync_tab()
+                    except Exception:
+                        pass
+                    self._invalidate()
+                    return self._req(method, path, body, _relaunched=True)
+            raise EngineError(
+                "webview agent unreachable at %s (%s)%s" %
+                (self.base, str(e)[:100],
+                 " — auto-launch failed" if self.auto_launch else ""))
 
     def _get(self, path):
         return self._req("GET", path)
 
     def _post(self, path, body):
         return self._req("POST", path, body)
+
+    def _status_or_none(self):
+        try:
+            st = self._get("/status")
+            if isinstance(st, dict) and st.get("ok"):
+                return st
+        except Exception:
+            pass
+        return None
 
     def _ok(self, r):
         if isinstance(r, dict) and r.get("ok"):
@@ -1313,7 +1346,19 @@ class WebViewEngine:
         Connection refused means the agent is gone, not that the engine
         is broken. If `relaunch` is true and /status fails, fire
         `am start` (Android only) and poll until it answers again.
+
+        Re-entrancy guard: the _req auto-heal hook calls this method, and
+        this method probes via _get/_req — without the guard that's
+        infinite recursion when the agent is down.
         """
+        _was_healing = getattr(self, "_healing", False)
+        self._healing = True
+        try:
+            return self._ensure_alive_inner(retries, relaunch, wait)
+        finally:
+            self._healing = _was_healing
+
+    def _ensure_alive_inner(self, retries, relaunch, wait):
         for attempt in range(retries + 1):
             try:
                 st = self._get("/status")
@@ -1335,8 +1380,10 @@ class WebViewEngine:
                 while time.time() < end:
                     time.sleep(wait)
                     try:
-                        return self.ensure_alive(retries=0,
-                                                 relaunch=False)
+                        r = self.ensure_alive(retries=0, relaunch=False)
+                        if isinstance(r, dict) and r.get("success"):
+                            r["relaunched"] = True
+                        return r
                     except Exception:
                         pass
         return {"success": False, "errors": ["unreachable"]}

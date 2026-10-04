@@ -172,6 +172,9 @@ kancil --engine webview scroll 600 --verify ".new-post"  # wait for content
 kancil --engine webview click "#btn" --verify "#done"
 kancil --engine webview type "#q" "hello" --verify ".suggest"
 kancil --engine webview open https://example.com --verify "#main"
+# agent self-heal: if the app is dead, kancil auto-launches it via `am start`
+kancil --engine webview launch        # manual (re)launch, waits for agent
+kancil --engine webview open <url> --no-auto-launch  # opt out
 kancil --engine webview press Enter  # synthetic Enter; auto-submit form kalau key nggak ngapa-ngapain
 kancil --engine webview press Enter --no-submit-fallback  # tanpa auto-submit
 kancil --engine webview find "kata kunci"  # find-in-page: highlight + match count

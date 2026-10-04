@@ -32,7 +32,8 @@ def get_browser(args):
                pw_browser=pw_browser, pw_executable_path=pw_executable_path,
                cache=not getattr(args, "no_cache", False),
                dry_run=getattr(args, "dry_run", False),
-               impersonate=impersonate)
+               impersonate=impersonate,
+               webview_auto_launch=not getattr(args, "no_auto_launch", False))
     b.import_state(st)
     return b, st
 
@@ -133,6 +134,10 @@ def _common_flags(ap, suppress=False):
                     default=argparse.SUPPRESS if suppress else False,
                     help="webview engine: block click/submit unless "
                          "--confirm is passed (anti accidental publish)")
+    ap.add_argument("--no-auto-launch", action="store_true",
+                    default=argparse.SUPPRESS if suppress else False,
+                    help="webview engine: do not auto-launch the app via "
+                         "`am start` when its agent is unreachable")
     ap.add_argument("--local", action="store_true",
                     default=argparse.SUPPRESS if suppress else False,
                     help="bypass a running kancil daemon; run in this process")
@@ -376,6 +381,9 @@ def build_parser():
     fk.add_argument("text")
     fk.add_argument("--next", action="store_true",
                     help="webview: jump to the next match")
+
+    SP("launch", help="launch the Kancil Browser app "
+            "(webview engine: `am start`, waits for agent)")
 
     stl = SP("stealth", help="browser impersonation / anti-detect")
     stl.add_argument("action", choices=["status", "impersonate", "apply"],
@@ -822,6 +830,8 @@ def dispatch(b, args):
         return b.cookies()
     if c == "find":
         return b.find(args.text, next=getattr(args, "next", False))
+    if c == "launch":
+        return b.ensure_alive()
     if c == "stealth":
         if args.action == "impersonate":
             if not args.profile:
