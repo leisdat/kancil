@@ -534,7 +534,7 @@ class BrowserTest(unittest.TestCase):
     # ---- multipart ----
     def test_multipart_encode(self):
         import sys as _s
-        _s.path.insert(0, "/home/hatch/workspace")
+        _s.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from kancil.engines import _encode_multipart
         import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as f:
@@ -546,7 +546,6 @@ class BrowserTest(unittest.TestCase):
         self.assertIn(b"bob", body)
         self.assertIn(b'filename=', body)
         self.assertIn(b"hello", body)
-        import os
         os.unlink(path)
 
     def test_form_file_upload(self):
@@ -2875,7 +2874,7 @@ class DoctorTest(unittest.TestCase):
         import subprocess
         r = subprocess.run(
             [sys.executable, "-m", "kancil", "doctor", "--local"],
-            capture_output=True, text=True, cwd="/home/hatch/workspace/kancil",
+            capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             timeout=60)
         # exit 0 only when everything healthy; here playwright/webview fail
         self.assertIn("python", r.stdout)

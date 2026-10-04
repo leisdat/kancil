@@ -113,8 +113,16 @@ def stealth_session(profile=DEFAULT_PROFILE, proxy=None):
     s.headers.update(p.get("headers", {}))
     if proxy:
         s.proxies = {"http": proxy, "https": proxy}
-    # impersonate is per-request in curl_cffi; stash the target on the session
-    s._kancil_impersonate = p["impersonate"]
+    # impersonate is per-request in curl_cffi; wrapping request() so every
+    # call on this session applies the profile's TLS fingerprint.
+    _target = p["impersonate"]
+    _orig = s.request
+
+    def _impersonated_request(method, url, **kw):
+        kw.setdefault("impersonate", _target)
+        return _orig(method, url, **kw)
+
+    s.request = _impersonated_request  # type: ignore[method-assign]
     return s
 
 
