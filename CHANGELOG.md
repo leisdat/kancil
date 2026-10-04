@@ -1,5 +1,31 @@
 # Changelog — Kancil
 
+## Unreleased
+
+### Added
+- **Modul stealth** (`kancil/stealth.py`): impersonasi fingerprint TLS untuk
+  static engine via `curl_cffi` (opsional — fallback otomatis ke urllib kalau
+  tidak ter-install). 6 profil: `chrome`, `chrome_android` (default),
+  `firefox`, `safari`, `edge`, `tor`. Adapter kompatibel-urllib: netlog,
+  cache, cookies, dan retry tidak berubah.
+- **Snippet anti-detect JS** untuk engine webview
+  (`stealth.apply_stealth(engine)`): spoof `navigator.webdriver`, plugins,
+  noise canvas, vendor/renderer WebGL, `userAgentData`, `window.chrome`,
+  permissions, battery, dan audio fingerprint. Injeksi ulang tiap navigasi.
+- API: `Kancil(engine="static", impersonate=...)`,
+  `stealth_status()` / `stealth_impersonate()` / `stealth_apply()`;
+  CLI: `kancil stealth <status|impersonate|apply>` + flag global
+  `--impersonate` (tersimpan di sesi).
+- `kancil doctor` sekarang melaporkan status stealth (ketersediaan
+  curl_cffi + daftar profil).
+- `click(..., verify=...)`: pola validator ala Artemis — klik bisa
+  memverifikasi selector yang harus muncul sesudahnya.
+
+### Notes
+- 230 unit tests hijau (23 baru: modul stealth + wiring API/CLI).
+- Batasan jujur: spoofing injeksi-JS tidak sedalam patch engine-level
+  ala Camoufox; Kancil sengaja tetap kecil.
+
 ## 3.14.0 (2026-10-03)
 
 Kancil Browser: aplikasi Android pendamping + engine `webview`.

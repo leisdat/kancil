@@ -150,8 +150,37 @@ JavaScript, dan network log per tab — tanpa perlu agent. Tombol fullscreen vid
 > semua dialog rounded.
 >
 > `kancil doctor` — cek kesehatan sekali jalan: engine static/playwright/webview,
-> server agent, sesi login, disk, environment. Kalau ada yang rusak, dikasih tau
-> cara benerinnya.
+> server agent, sesi login, disk, environment, status stealth. Kalau ada yang
+> rusak, dikasih tau cara benerinnya.
+
+## Stealth (impersonasi browser)
+
+Dua lapis opt-in, dua-duanya ringan (`curl_cffi` opsional):
+
+```bash
+kancil stealth status                        # profil + transport aktif
+kancil stealth impersonate chrome_android    # static engine: spoofing
+                                             # fingerprint TLS (chrome, firefox,
+                                             # safari, edge, tor, chrome_android)
+kancil stealth impersonate off               # balik ke urllib
+kancil --impersonate tor open https://...    # sekali jalan via flag CLI
+kancil stealth apply                         # engine webview: injek JS
+                                             # anti-detect (webdriver, canvas,
+                                             # WebGL, ...)
+```
+
+```python
+from kancil.api import Kancil
+b = Kancil(engine="static", impersonate="chrome_android")
+b.engine.set_impersonate("firefox")   # atau None untuk matikan
+
+from kancil import stealth
+stealth.apply_stealth(webview_engine)  # injek ulang tiap navigasi
+```
+
+Spoofing injeksi-JS mencakup vektor fingerprinting umum tapi nggak sedalam
+patch engine-level ala Camoufox — checker canggih masih bisa detek. Kancil
+sengaja tetap kecil.
 
 ## Troubleshooting (engine webview)
 

@@ -173,12 +173,30 @@ def _check_dns():
                 "hint": "cek DNS / koneksi"}
 
 
+def _check_stealth():
+    try:
+        from . import stealth as _st
+    except Exception as e:
+        return {"name": "stealth", "status": "fail",
+                "detail": "modul stealth gagal di-load: %s" % str(e)[:60],
+                "hint": "cek kancil/stealth.py"}
+    if _st.HAVE_CURL_CFFI:
+        return {"name": "stealth", "status": "ok",
+                "detail": "curl_cffi tersedia; profil: %s"
+                          % ", ".join(_st.list_profiles()),
+                "hint": ""}
+    return {"name": "stealth", "status": "warn",
+            "detail": "curl_cffi tidak ter-install (impersonasi TLS nonaktif, "
+                      "fallback urllib)",
+            "hint": "pip install curl_cffi untuk mengaktifkan"}
+
+
 def run():
     """Run all checks. Returns (checks, all_ok)."""
     checks = [_check_python(), _check_dns(), _check_static(),
               _check_playwright()]
     checks.extend(_check_webview())
-    checks.extend([_check_disk(), _check_env()])
+    checks.extend([_check_disk(), _check_env(), _check_stealth()])
     all_ok = all(c["status"] != "fail" for c in checks)
     return checks, all_ok
 

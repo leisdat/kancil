@@ -2843,7 +2843,7 @@ class DoctorTest(unittest.TestCase):
         self.assertTrue(len(checks) >= 6)
         names = [c["name"] for c in checks]
         for n in ("python", "dns", "static engine", "playwright engine",
-                  "webview engine", "disk", "environment"):
+                  "webview engine", "disk", "environment", "stealth"):
             self.assertIn(n, names, names)
         for c in checks:
             self.assertIn(c["status"], ("ok", "warn", "fail"))
@@ -2857,6 +2857,18 @@ class DoctorTest(unittest.TestCase):
         txt = doctor.format_text(checks)
         self.assertIn("python", txt)
         self.assertTrue(any(s in txt for s in ("✓", "!", "✗")))
+
+    def test_stealth_check(self):
+        from kancil import doctor
+        from kancil import stealth
+        checks, _ = doctor.run()
+        sc = [c for c in checks if c["name"] == "stealth"][0]
+        if stealth.HAVE_CURL_CFFI:
+            self.assertEqual(sc["status"], "ok")
+            self.assertIn("chrome_android", sc["detail"])
+        else:
+            self.assertEqual(sc["status"], "warn")
+            self.assertIn("curl_cffi", sc["hint"])
 
     def test_api_doctor(self):
         from kancil.api import Kancil
