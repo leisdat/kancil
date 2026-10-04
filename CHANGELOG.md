@@ -3,6 +3,19 @@
 ## Unreleased
 
 ### Added
+- **Response-body capture** (APK agent 1.23): `/network` tidak cuma metadata
+  lagi — semua response XHR/fetch direkam (64KB cap, 60 terakhir per tab)
+  via patch `fetch`/XHR di JS. Jalur aman: observe-only, tanpa
+  `shouldInterceptRequest`, jadi loading native tidak disentuh. Endpoint
+  `GET /network/bodies[?clear=1]`; Python `network_bodies()` /
+  `network_response(rid)` (bentuk hasil sama kayak static engine, JSON
+  di-pretty); CLI `kancil network bodies [clear]` + `kancil network
+  response <id>`. Limit jujur: cuma XHR/fetch, bukan dokumen/gambar.
+- **Human-like swipe** (APK agent 1.22): `/touch` terima flag `human` —
+  swipe pakai trajektori bezier melengkung, ease-in-out, jitter, micro-pause
+  ala jari manusia. Python `touch(..., human=True)`, CLI `--human`. Untuk
+  slider yang ada behavior analysis (mis. Aliyun CAPTCHA); tanpa garansi
+  lolos — arms race.
 - **`/touch` endpoint** (APK agent 1.21): tap / swipe / longpress /
   pinch sintetis via `MotionEvent` → `dispatchTouchEvent()` — koordinat CSS
   px (app konversi pakai skala WebView). Python `touch(action, x, y, x2,
