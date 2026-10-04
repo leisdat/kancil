@@ -25,8 +25,9 @@
 
 ✨ **New:** TLS fingerprint impersonation (`kancil stealth impersonate`,
 6 browser profiles) · WebView anti-detect JS injection · `kancil session clear`
-with per-domain cookie wipe · APK agent 1.17 (`/cookies/clear`, `/cache/clear`)
-· `click(..., verify=...)` validator pattern · stealth status in `kancil doctor`.
+with per-domain cookie wipe · APK agent 1.18 (`/cookies/set`, `/ua/set`,
+`/find`) · `click(..., verify=...)` validator pattern · stealth status in
+`kancil doctor`.
 
 ```bash
 pip install -e .
@@ -169,6 +170,10 @@ kancil --engine webview scroll 600 --settle-ms 1200  # scroll + wait render
 kancil --engine webview scroll 600 --verify ".new-post"  # wait for content
 kancil --engine webview press Enter  # synthetic Enter; auto-submit form kalau key nggak ngapa-ngapain
 kancil --engine webview press Enter --no-submit-fallback  # tanpa auto-submit
+kancil --engine webview find "kata kunci"  # find-in-page: highlight + match count
+# cookie session injection (agent 1.18+), UA override per tab
+kancil cookies set sess abc123 --domain example.com
+kancil --engine webview ua set "CustomUA/1.0"  # kancil ua reset untuk balik
 kancil --engine webview composer-open  # m.facebook composer via warm nav
 kancil --engine webview har export yt.har  # HAR dari netlog APK (auto-sync)
 kancil --engine webview downloads  # dl_status + bytes_done/bytes_total per file
