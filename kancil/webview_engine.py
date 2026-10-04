@@ -139,7 +139,7 @@ class WebViewEngine:
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
-    def open(self, url, data=None, idle=False, idle_timeout=15):
+    def open(self, url, data=None, idle=False, idle_timeout=15, verify=None):
         if not url.startswith(("http://", "https://", "file://")):
             url = "https://" + url
         self.sync_tab()  # cheap; keeps cur honest after app restarts
@@ -172,6 +172,13 @@ class WebViewEngine:
                     "page looks like an empty shell (title renders, no "
                     "content) — likely a login gate. Log in once in the "
                     "Kancil Browser app, then retry.")
+        if verify:
+            # Validator (Artemis pattern): the nav only counts if
+            # the expected content actually shows up.
+            vr = self.wait(selector=verify)
+            out["verify"] = vr.get("success", False)
+            if not vr.get("success"):
+                out["errors"] = vr.get("errors")
         return out
 
     def _content_signal(self):
@@ -453,7 +460,7 @@ class WebViewEngine:
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
-    def type(self, query, text):
+    def type(self, query, text, verify=None):
         # Native value setter (not execCommand): works with React/Vue/Angular
         # controlled inputs because it triggers their value tracking.
         try:
@@ -478,7 +485,15 @@ class WebViewEngine:
             if err:
                 return {"success": False, "errors": [err]}
             self._invalidate()
-            return {"success": True}
+            out = {"success": True}
+            if verify:
+                # Validator (Artemis pattern): typing only counts
+                # if its expected effect shows up.
+                vr = self.wait(selector=verify)
+                out["verify"] = vr.get("success", False)
+                if not vr.get("success"):
+                    out["errors"] = vr.get("errors")
+            return out
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 

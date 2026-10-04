@@ -37,6 +37,9 @@
   halaman), API `cookies_set/ua_reset/find`, CLI `kancil cookies
   <list|set|clear>`, `kancil find <text> [--next]`, `kancil ua reset`
   (`ua set` kini juga jalan di webview).
+- **Pola validator Artemis diperluas**: `type --verify` dan `open --verify`
+  (engine webview; CLI, API, dan tool-action ikut mendukung). Aksi hanya
+  dihitung tuntas kalau efeknya benar-benar muncul di halaman.
 
 ### Notes
 - 230 unit tests hijau (23 baru: modul stealth + wiring API/CLI).

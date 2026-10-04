@@ -159,6 +159,9 @@ def build_parser():
     sp.add_argument("--idle", action="store_true",
                     help="webview: wait for page settle (readyState + "
                          "network quiet) like a human would")
+    sp.add_argument("--verify", default=None,
+                    help="webview: selector that must appear after open "
+                         "(validator pattern)")
     SP("back", help="go back")
     SP("fwd", help="go forward")
     SP("reload", help="reload page")
@@ -180,9 +183,15 @@ def build_parser():
     el.add_argument("selector")
     el.add_argument("--confirm", action="store_true",
                     help="required to actuate in --dry-run mode")
+    el.add_argument("--verify", default=None,
+                    help="webview: selector that must appear after the click "
+                         "(validator pattern)")
     el = SP("type", help="type into element")
     el.add_argument("selector")
     el.add_argument("text")
+    el.add_argument("--verify", default=None,
+                    help="webview: selector that must appear after typing "
+                         "(validator pattern)")
     el = SP("clear", help="clear element")
     el.add_argument("selector")
     pr = SP("press", help="press a key like a human (Enter/Escape/Tab/arrows)")
@@ -531,7 +540,8 @@ def main(argv=None):
 def dispatch(b, args):
     c = args.cmd
     if c == "open":
-        r = b.open(args.url, idle=getattr(args, "idle", False))
+        r = b.open(args.url, idle=getattr(args, "idle", False),
+                   verify=getattr(args, "verify", None))
         wait_ms = getattr(args, "wait_ms", 0) or 0
         if wait_ms > 0 and r.get("success"):
             import time as _t
@@ -562,9 +572,11 @@ def dispatch(b, args):
         if args.action == "xpath":
             return b.dom_xpath(args.target or "")
     if c == "click":
-        return b.click(args.selector, confirm=args.confirm)
+        return b.click(args.selector, confirm=args.confirm,
+                       verify=getattr(args, "verify", None))
     if c == "type":
-        return b.type(args.selector, args.text)
+        return b.type(args.selector, args.text,
+                      verify=getattr(args, "verify", None))
     if c == "press":
         return b.press(args.key, args.selector,
                        submit_fallback=not args.no_submit_fallback)

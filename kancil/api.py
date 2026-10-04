@@ -88,9 +88,10 @@ class Kancil:
         return caps
 
     # ---------- navigation ----------
-    def open(self, url, idle=False, idle_timeout=15):
+    def open(self, url, idle=False, idle_timeout=15, verify=None):
         if self._engine_name == "webview":
-            r = self.engine.open(url, idle=idle, idle_timeout=idle_timeout)
+            r = self.engine.open(url, idle=idle, idle_timeout=idle_timeout,
+                                 verify=verify)
         else:
             r = self.engine.open(url)
         return self._wrap(r)
@@ -277,13 +278,17 @@ class Kancil:
         return ok(query=query, role=role, count=len(matches),
                   matches=matches[:20])
 
-    def click(self, selector, confirm=False):
+    def click(self, selector, confirm=False, verify=None):
         if self._engine_name == "webview":
-            return self._wrap(self.engine.click(selector, confirm=confirm))
+            return self._wrap(self.engine.click(selector, confirm=confirm,
+                                                verify=verify))
         return self._wrap(self.engine.click(selector))
 
-    def type(self, selector, text):
-        return self._wrap(self.engine.type(selector, text))
+    def type(self, selector, text, verify=None):
+        try:
+            return self._wrap(self.engine.type(selector, text, verify=verify))
+        except TypeError:
+            return self._wrap(self.engine.type(selector, text))
 
     def clear(self, selector):
         return self._wrap(self.engine.clear(selector))
@@ -1527,7 +1532,9 @@ class Kancil:
 # Action table for Kancil.tool(). Maps action -> (instance, payload) -> result.
 Kancil._TOOL_ACTIONS = {
     # navigation
-    "open": lambda s, p: s.open(p.get("url", "")),
+    "open": lambda s, p: s.open(p.get("url", ""),
+                        idle=p.get("idle", False),
+                        verify=p.get("verify")),
     "back": lambda s, p: s.back(),
     "forward": lambda s, p: s.forward(),
     "reload": lambda s, p: s.reload(),
@@ -1547,8 +1554,11 @@ Kancil._TOOL_ACTIONS = {
     "dom_find": lambda s, p: s.dom_find(p.get("selector", "")),
     "dom_xpath": lambda s, p: s.dom_xpath(p.get("xpath", "")),
     # interaction
-    "click": lambda s, p: s.click(p.get("selector", "")),
-    "type": lambda s, p: s.type(p.get("selector", ""), p.get("text", "")),
+    "click": lambda s, p: s.click(p.get("selector", ""),
+                         confirm=p.get("confirm", False),
+                         verify=p.get("verify")),
+    "type": lambda s, p: s.type(p.get("selector", ""), p.get("text", ""),
+                        verify=p.get("verify")),
     "clear": lambda s, p: s.clear(p.get("selector", "")),
     "select": lambda s, p: s.select(p.get("selector", ""), p.get("value", "")),
     "check": lambda s, p: s.check(p.get("selector", "")),

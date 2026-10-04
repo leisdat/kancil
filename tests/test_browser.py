@@ -3083,3 +3083,83 @@ class AgentPowerTest(unittest.TestCase):
         self.assertEqual((a.cmd, a.text), ("find", "hello"))
         a = p.parse_args(["ua", "reset"])
         self.assertEqual((a.cmd, a.action), ("ua", "reset"))
+
+
+class VerifyPatternTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from kancil.webview_engine import WebViewEngine
+        cls.port = free_port()
+        cls.srv = http.server.HTTPServer(("127.0.0.1", cls.port),
+                                         WebViewAgentHandler)
+        cls.th = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.th.start()
+        cls.eng = WebViewEngine(port=cls.port, timeout=10)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
+    def _ok_wait(self):
+        orig = self.eng.wait
+        self.eng.wait = lambda **k: {"success": True}
+        return orig
+
+    def _fail_wait(self):
+        orig = self.eng.wait
+        self.eng.wait = lambda **k: {"success": False,
+                                     "errors": ["timeout waiting"]}
+        return orig
+
+    def test_type_verify(self):
+        orig = self._ok_wait()
+        try:
+            r = self.eng.type("#q", "hello", verify="#q")
+            self.assertTrue(r["success"], r)
+            self.assertTrue(r["verify"])
+        finally:
+            self.eng.wait = orig
+
+    def test_type_verify_fail(self):
+        orig = self._fail_wait()
+        try:
+            r = self.eng.type("#q", "hello", verify="#never")
+            self.assertTrue(r["success"], r)  # typing itself landed
+            self.assertFalse(r["verify"])
+            self.assertIn("errors", r)
+        finally:
+            self.eng.wait = orig
+
+    def test_type_no_verify_unchanged(self):
+        r = self.eng.type("#q", "hello")
+        self.assertTrue(r["success"], r)
+        self.assertNotIn("verify", r)
+
+    def test_open_verify(self):
+        orig = self._ok_wait()
+        try:
+            r = self.eng.open("https://example.com/", verify="#b1")
+            self.assertTrue(r["success"], r)
+            self.assertTrue(r["verify"])
+        finally:
+            self.eng.wait = orig
+
+    def test_open_verify_fail(self):
+        orig = self._fail_wait()
+        try:
+            r = self.eng.open("https://example.com/", verify="#never")
+            self.assertTrue(r["success"], r)  # nav itself landed
+            self.assertFalse(r["verify"])
+            self.assertIn("errors", r)
+        finally:
+            self.eng.wait = orig
+
+    def test_cli_verify_flags_parse(self):
+        from kancil import cli as cli_mod
+        p = cli_mod.build_parser()
+        a = p.parse_args(["open", "https://example.com", "--verify", "#main"])
+        self.assertEqual(a.verify, "#main")
+        a = p.parse_args(["click", "#b", "--verify", "#done"])
+        self.assertEqual(a.verify, "#done")
+        a = p.parse_args(["type", "#q", "hi", "--verify", ".suggest"])
+        self.assertEqual(a.verify, ".suggest")
