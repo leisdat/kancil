@@ -25,7 +25,7 @@
 
 ✨ **Baru:** impersonasi fingerprint TLS (`kancil stealth impersonate`,
 6 profil browser) · injeksi JS anti-detect buat WebView · `kancil session clear`
-dengan wipe cookie per-domain · APK agent 1.21 (`/touch` tap/swipe/pinch,
+dengan wipe cookie per-domain · APK agent 1.23 (`/touch` tap/swipe/pinch + human-like swipe,
 upload base64, auto-launch via `am start`, CLI `blocklist`) · pola validator
 (`click`/`type`/`open --verify`) · status stealth di `kancil doctor`.
 
