@@ -324,6 +324,9 @@ def build_parser():
                     help="session clear targets: all (default) or comma "
                          "separated subset of cookies,tabs,netlog,cache "
                          "(support varies per engine)")
+    se.add_argument("--domain", default=None,
+                    help="session clear: limit cookie wiping to one domain "
+                         "(e.g. --what cookies --domain example.com)")
 
     ha = SP("har", help="HAR recording session")
     ha.add_argument("action", choices=["start", "stop", "export", "clear", "stats"])
@@ -719,7 +722,8 @@ def dispatch(b, args):
         if args.action == "info":
             return b.session_info(args.name)
         if args.action == "clear":
-            return b.session_clear(getattr(args, "what", "all") or "all")
+            return b.session_clear(getattr(args, "what", "all") or "all",
+                                   domain=getattr(args, "domain", None))
         return b.session_list()
     if c == "har":
         if args.action == "start":

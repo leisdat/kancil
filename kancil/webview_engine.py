@@ -942,24 +942,53 @@ class WebViewEngine:
         self.netlog = []
         return {"success": True}
 
-    _CLEAR_WHATS = ("tabs", "netlog")
+    def cookies_clear(self, domain=None):
+        """Clear WebView cookies via the app agent (all, or one domain)."""
+        try:
+            r = self._post("/cookies/clear",
+                           {"domain": domain} if domain else {})
+            if isinstance(r, dict) and r.get("ok"):
+                return {"success": True, "domain": domain or "all"}
+            return {"success": False,
+                    "errors": [str(r)[:200] if isinstance(r, dict)
+                               else "bad response"]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
 
-    def clear_session(self, what="all"):
+    def cache_clear(self):
+        """Clear the WebView HTTP cache via the app agent."""
+        try:
+            self._post("/cache/clear", {})
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    _CLEAR_WHATS = ("cookies", "tabs", "netlog", "cache")
+
+    def clear_session(self, what="all", domain=None):
         """Wipe current session state (webview engine).
 
-        Clears tabs (all closed, one fresh blank tab) and the network log.
-        Cookies are deliberately NOT cleared: they hold your logins
-        (FB, YT, ...) and the app agent has no cookie-clear endpoint.
+        "all" clears tabs, netlog and cache but NOT cookies — those hold
+        your app logins (FB, YT, ...). Pass what="cookies" explicitly
+        (optionally with domain=) to wipe cookies.
         """
         if what == "all":
-            items = list(self._CLEAR_WHATS)
+            items = ["tabs", "netlog", "cache"]
         else:
             items = [w.strip() for w in str(what).split(",") if w.strip()]
-            bad = [w for w in items if w not in ("cookies", "tabs", "netlog", "cache")]
+            bad = [w for w in items if w not in self._CLEAR_WHATS]
             if bad:
                 return {"success": False,
-                        "errors": ["unknown clear target(s): %s" % ", ".join(bad)]}
+                        "errors": ["unknown clear target(s): %s (choose from %s)"
+                                   % (", ".join(bad),
+                                      "all, " + ", ".join(self._CLEAR_WHATS))]}
         cleared, skipped = [], {}
+        if "cookies" in items:
+            r = self.cookies_clear(domain)
+            if r.get("success"):
+                cleared.append("cookies" + ("(%s)" % domain if domain else ""))
+            else:
+                skipped["cookies"] = "; ".join(r.get("errors", ["failed"]))
         if "tabs" in items:
             try:
                 tabs = self.list_tabs()
@@ -979,10 +1008,12 @@ class WebViewEngine:
         if "netlog" in items:
             self.network_clear()
             cleared.append("netlog")
-        for w in ("cookies", "cache"):
-            if w in items:
-                skipped[w] = ("not supported on the webview engine "
-                             "(cookies hold your app logins)")
+        if "cache" in items:
+            r = self.cache_clear()
+            if r.get("success"):
+                cleared.append("cache")
+            else:
+                skipped["cache"] = "; ".join(r.get("errors", ["failed"]))
         out = {"success": True, "cleared": cleared}
         if skipped:
             out["skipped"] = skipped

@@ -206,6 +206,19 @@ kancil stealth apply                         # webview engine: inject anti-detec
                                              # JS (webdriver, canvas, WebGL, ...)
 ```
 
+## Session clear
+
+```bash
+kancil session clear                          # wipe everything
+kancil session clear --what cookies           # cookies only
+kancil session clear --what cookies --domain example.com  # one site only
+```
+
+Static engine wipes cookies (incl. the impersonated session jar), tabs,
+netlog and cache. Webview closes tabs, clears netlog + WebView cache;
+`all` never touches cookies (they hold your logins) — pass
+`--what cookies` explicitly to wipe them (needs APK agent 1.17+).
+
 ```python
 from kancil.api import Kancil
 b = Kancil(engine="static", impersonate="chrome_android")

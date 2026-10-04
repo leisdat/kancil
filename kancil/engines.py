@@ -537,9 +537,10 @@ class StaticEngine:
 
     _CLEAR_WHATS = ("cookies", "tabs", "netlog", "cache")
 
-    def clear_session(self, what="all"):
+    def clear_session(self, what="all", domain=None):
         """Wipe current session state. what: all (default) or a comma
-        separated subset of cookies,tabs,netlog,cache."""
+        separated subset of cookies,tabs,netlog,cache. domain: limit
+        cookie clearing to one domain (e.g. "example.com")."""
         if what == "all":
             items = list(self._CLEAR_WHATS)
         else:
@@ -553,12 +554,31 @@ class StaticEngine:
         cleared = []
         if "cookies" in items:
             try:
-                self.jar.clear()
+                if domain:
+                    d = domain.strip().lower()
+                    # CookieJar.clear matches exact domain; try both forms
+                    for cand in (d, "." + d.lstrip(".")):
+                        try:
+                            self.jar.clear(cand)
+                        except Exception:
+                            pass
+                else:
+                    self.jar.clear()
             except Exception:
                 pass
             try:
                 if isinstance(self.opener, _stealth.ImpersonatedOpener):
-                    self.opener.session.cookies.clear()
+                    sess_jar = self.opener.session.cookies
+                    if domain:
+                        d = domain.strip().lower()
+                        for ck in list(sess_jar.jar):
+                            if ck.domain and ck.domain.lstrip(".") == d.lstrip("."):
+                                try:
+                                    sess_jar.jar.clear(ck.domain, ck.path, ck.name)
+                                except Exception:
+                                    pass
+                    else:
+                        sess_jar.clear()
             except Exception:
                 pass
             try:
@@ -566,7 +586,7 @@ class StaticEngine:
                     self.jar.save(ignore_discard=True)
             except Exception:
                 pass
-            cleared.append("cookies")
+            cleared.append("cookies" + ("(%s)" % domain if domain else ""))
         if "tabs" in items:
             self.tabs = [{"history": [], "pos": -1}]
             self.cur = 0

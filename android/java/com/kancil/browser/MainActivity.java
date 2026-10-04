@@ -1773,7 +1773,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.16");
+                            oo.put("agent", "kancil-browser/1.17");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -2263,6 +2263,50 @@ public class MainActivity extends Activity {
                     JSONObject o = new JSONObject();
                     o.put("ok", true); o.put("cookies", a);
                     return AgentServer.Response.json(o);
+                }
+                case "/cookies/clear": {
+                    String d = body.optString("domain", null);
+                    if (d == null || d.isEmpty()) d = query.get("domain");
+                    if (d == null) d = "";
+                    final String fDomain = d;
+                    uiGet(() -> {
+                        CookieManager cm = CookieManager.getInstance();
+                        if (!fDomain.isEmpty()) {
+                            // expire each cookie for the domain (https + http)
+                            for (String scheme : new String[]{"https://", "http://"}) {
+                                String raw = cm.getCookie(scheme + fDomain);
+                                if (raw != null) {
+                                    for (String part : raw.split(";")) {
+                                        int ei = part.indexOf('=');
+                                        if (ei > 0) {
+                                            String n = part.substring(0, ei).trim();
+                                            cm.setCookie(scheme + fDomain, n
+                                                + "=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/");
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            final CountDownLatch cdl = new CountDownLatch(1);
+                            cm.removeAllCookies(v -> cdl.countDown());
+                            try { cdl.await(10, TimeUnit.SECONDS); }
+                            catch (InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                            }
+                        }
+                        cm.flush();
+                        return null;
+                    });
+                    JSONObject oc = new JSONObject();
+                    oc.put("ok", true); oc.put("domain", fDomain);
+                    return AgentServer.Response.json(oc);
+                }
+                case "/cache/clear": {
+                    uiGet(() -> {
+                        activeWeb().clearCache(true);
+                        return null;
+                    });
+                    return ok();
                 }
                 case "/screenshot": {
                     byte[] png = screenshot();

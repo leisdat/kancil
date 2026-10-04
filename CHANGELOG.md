@@ -20,10 +20,15 @@
   curl_cffi + daftar profil).
 - `click(..., verify=...)`: pola validator ala Artemis — klik bisa
   memverifikasi selector yang harus muncul sesudahnya.
-- **`kancil session clear`** (`--what all|cookies,tabs,netlog,cache`):
-  wipe state sesi berjalan. Static engine: cookies (termasuk jar sesi
-  impersonasi), tab, netlog, cache. Webview: tab + netlog (cookies sengaja
-  tidak disentuh — isinya login FB/YT).
+- **`kancil session clear`** (`--what all|cookies,tabs,netlog,cache`,
+  `--domain`): wipe state sesi berjalan. Static engine: cookies (termasuk
+  jar sesi impersonasi), tab, netlog, cache; `--domain example.com` untuk
+  surgical cookie wipe satu situs. Webview: tab + netlog + cache; cookies
+  hanya bila diminta eksplisit (`all` tidak menyentuh cookies demi
+  melindungi login).
+- **APK agent 1.17**: endpoint baru `/cookies/clear` (semua atau per-domain)
+  dan `/cache/clear` — dipakai `WebViewEngine.cookies_clear()` /
+  `cache_clear()`.
 
 ### Notes
 - 230 unit tests hijau (23 baru: modul stealth + wiring API/CLI).

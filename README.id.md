@@ -182,6 +182,19 @@ Spoofing injeksi-JS mencakup vektor fingerprinting umum tapi nggak sedalam
 patch engine-level ala Camoufox — checker canggih masih bisa detek. Kancil
 sengaja tetap kecil.
 
+## Session clear
+
+```bash
+kancil session clear                                         # wipe semua
+kancil session clear --what cookies                          # cuma cookies
+kancil session clear --what cookies --domain example.com     # satu situs aja
+```
+
+Static engine: cookies (termasuk jar sesi impersonasi), tab, netlog, cache.
+Webview: tutup tab, clear netlog + cache WebView; `all` nggak pernah sentuh
+cookies (isinya login lo) — pakai `--what cookies` eksplisit kalau mau wipe
+(butuh APK agent 1.17+).
+
 ## Troubleshooting (engine webview)
 
 **App di-freeze / agent timeout (MIUI, layar mati).**

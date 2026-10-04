@@ -985,15 +985,19 @@ class Kancil:
         return self._wrap(_st.apply_stealth(self.engine))
 
     # ---------- session ----------
-    def session_clear(self, what="all"):
+    def session_clear(self, what="all", domain=None):
         """Wipe current session state (cookies, tabs, netlog, cache —
-        per-engine support varies; see engine.clear_session)."""
+        per-engine support varies; see engine.clear_session).
+        domain limits cookie clearing to one site."""
         fn = getattr(self.engine, "clear_session", None)
         if not fn:
             return {"success": False,
                     "errors": ["engine %s does not support session clear"
                                % self.engine.name]}
-        return self._wrap(fn(what))
+        try:
+            return self._wrap(fn(what, domain=domain))
+        except TypeError:
+            return self._wrap(fn(what))
 
     # ---------- request blocking (playwright, webview) ----------
     def block_add(self, pattern):

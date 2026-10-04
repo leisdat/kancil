@@ -2985,15 +2985,31 @@ class SessionClearTest(unittest.TestCase):
         eng.netlog = [{"id": 1}]
         eng.network_clear = lambda: calls.append(("netclear",)) or setattr(
             eng, "netlog", []) or {"success": True}
+        eng.cookies_clear = lambda domain=None: calls.append(
+            ("cookies_clear", domain)) or {"success": True}
+        eng.cache_clear = lambda: calls.append(("cache_clear",)) or {"success": True}
 
+        # "all" clears tabs+netlog+cache but NOT cookies (logins protected)
         r = eng.clear_session("all")
         self.assertTrue(r["success"], r)
-        self.assertEqual(r["cleared"], ["tabs", "netlog"])
+        self.assertEqual(r["cleared"], ["tabs", "netlog", "cache"])
         self.assertIn(("close", 2), calls)
         self.assertIn(("open", "about:blank"), calls)
         self.assertEqual(eng.netlog, [])
 
-        r = eng.clear_session("cookies,cache")
+        # explicit cookies with domain
+        r = eng.clear_session("cookies", domain="example.com")
         self.assertTrue(r["success"], r)
-        self.assertIn("cookies", r["skipped"])
-        self.assertIn("cache", r["skipped"])
+        self.assertEqual(r["cleared"], ["cookies(example.com)"])
+        self.assertIn(("cookies_clear", "example.com"), calls)
+
+    def test_static_clear_domain(self):
+        from kancil.engines import StaticEngine
+        eng = StaticEngine(cache=False)
+        eng.jar.set_cookie(_mk_cookie("a", "1", "example.com"))
+        eng.jar.set_cookie(_mk_cookie("b", "2", "other.com"))
+        r = eng.clear_session("cookies", domain="example.com")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["cleared"], ["cookies(example.com)"])
+        names = sorted(c.name for c in eng.jar)
+        self.assertEqual(names, ["b"])
