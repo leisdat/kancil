@@ -3624,3 +3624,77 @@ class WebViewTouchTest(unittest.TestCase):
                          ("touch", "swipe", 100.0, 200.0))
         a = p.parse_args(["touch", "--selector", "#btn"])
         self.assertEqual((a.action, a.selector), ("tap", "#btn"))
+
+
+class WebViewTouchV2Test(unittest.TestCase):
+    def _eng(self):
+        from kancil.webview_engine import WebViewEngine
+        eng = WebViewEngine.__new__(WebViewEngine)
+        eng.host, eng.port = "127.0.0.1", 18092
+        eng.base = "http://127.0.0.1:18092"
+        eng.timeout = 5
+        eng.errors, eng.netlog = [], []
+        eng.cur = 0
+        eng.auto_launch = False
+        eng._page_cache, eng._page_url = None, None
+        return eng
+
+    def test_touch_uses_standard_targeting(self):
+        eng = self._eng()
+        seen = {}
+        eng.evaluate = lambda js: seen.update(
+            {"js": js}) or {"success": True, "result": '"10,20"'}
+        eng._post = lambda p, b: {"ok": True, "action": "tap"}
+        r = eng.touch("tap", selector="Putar")  # visible text
+        self.assertTrue(r["success"], r)
+        # standard targeting JS (shadow-DOM piercing helpers), not raw
+        # querySelector
+        self.assertIn("__kancilQ", seen["js"])
+        self.assertIn("Putar", seen["js"])
+
+    def test_touch_a11y_ref(self):
+        eng = self._eng()
+        eng._a11y_css = {"button_3": "#real-btn"}
+        eng.evaluate = lambda js: {"success": True, "result": '"1,2"'} \
+            if "#real-btn" in js else {"success": True, "result": "null"}
+        eng._post = lambda p, b: {"ok": True, "action": "tap"}
+        r = eng.touch("tap", selector="@button_3")
+        self.assertTrue(r["success"], r)
+
+    def test_pinch_out_maps_distances(self):
+        eng = self._eng()
+        posted = {}
+        eng._post = lambda p, b: posted.update(
+            {"b": b}) or {"ok": True, "action": "pinch"}
+        r = eng.touch("pinch_out", x=540, y=900)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(posted["b"]["action"], "pinch")
+        self.assertLess(posted["b"]["distance_start"],
+                        posted["b"]["distance_end"])  # spread = zoom out
+
+    def test_pinch_in_maps_distances(self):
+        eng = self._eng()
+        posted = {}
+        eng._post = lambda p, b: posted.update(
+            {"b": b}) or {"ok": True, "action": "pinch"}
+        eng.touch("pinch_in", x=540, y=900)
+        self.assertGreater(posted["b"]["distance_start"],
+                           posted["b"]["distance_end"])  # close = zoom in
+
+    def test_pinch_explicit(self):
+        eng = self._eng()
+        posted = {}
+        eng._post = lambda p, b: posted.update(
+            {"b": b}) or {"ok": True, "action": "pinch"}
+        r = eng.touch("pinch", x=1, y=2, distance_start=100,
+                      distance_end=300, duration_ms=600)
+        self.assertTrue(r["success"], r)
+        self.assertEqual((posted["b"]["distance_start"],
+                          posted["b"]["distance_end"],
+                          posted["b"]["duration_ms"]), (100, 300, 600))
+
+    def test_cli_pinch_parses(self):
+        from kancil import cli as cli_mod
+        p = cli_mod.build_parser()
+        a = p.parse_args(["touch", "pinch_out", "--x", "540", "--y", "900"])
+        self.assertEqual((a.cmd, a.action), ("touch", "pinch_out"))

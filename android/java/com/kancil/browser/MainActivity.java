@@ -1779,7 +1779,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.20");
+                            oo.put("agent", "kancil-browser/1.21");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -2442,9 +2442,10 @@ public class MainActivity extends Activity {
                     if (tAction.isEmpty()) tAction = "tap";
                     final String fAction = tAction.toLowerCase();
                     if (!fAction.equals("tap") && !fAction.equals("swipe")
-                            && !fAction.equals("longpress"))
+                            && !fAction.equals("longpress")
+                            && !fAction.equals("pinch"))
                         return AgentServer.Response.err(400,
-                                "action must be tap|swipe|longpress");
+                                "action must be tap|swipe|longpress|pinch");
                     String[] tkeys = {"x", "y", "x2", "y2"};
                     final double[] tc = new double[4];
                     for (int ti = 0; ti < 4; ti++) {
@@ -2468,6 +2469,12 @@ public class MainActivity extends Activity {
                         return AgentServer.Response.err(400,
                                 "swipe needs x2/y2");
                     final long fDur = tDur;
+                    double ds = body.optDouble("distance_start", -1);
+                    double de = body.optDouble("distance_end", -1);
+                    if (fAction.equals("pinch") && (ds < 0 || de < 0))
+                        return AgentServer.Response.err(400,
+                                "pinch needs distance_start/distance_end");
+                    final double fDs = ds, fDe = de;
                     try {
                         uiGet(() -> {
                             WebView w = activeWeb();
@@ -2476,7 +2483,12 @@ public class MainActivity extends Activity {
                                            (float) (tc[1] * scale),
                                            (float) (tc[2] * scale),
                                            (float) (tc[3] * scale)};
-                            dispatchTouchSeq(w, fAction, pts, fDur);
+                            if (fAction.equals("pinch"))
+                                dispatchPinch(w, pts[0], pts[1],
+                                        (float) (fDs * scale),
+                                        (float) (fDe * scale), fDur);
+                            else
+                                dispatchTouchSeq(w, fAction, pts, fDur);
                             return null;
                         });
                     } catch (Exception e) {
@@ -2506,6 +2518,79 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "Agent server failed: " + e.getMessage(),
                     Toast.LENGTH_LONG).show();
         }
+    }
+
+    /** Two-finger pinch on a WebView (UI thread). Fingers start
+     * distance_start px apart centered at (cx, cy) and end distance_end
+     * px apart; start < end = zoom out. DOWN -> POINTER_DOWN ->
+     * MOVE... -> POINTER_UP -> UP. */
+    private void dispatchPinch(WebView w, float cx, float cy,
+                               float dStart, float dEnd, long durationMs) {
+        long down = SystemClock.uptimeMillis();
+        long dur = durationMs > 0 ? durationMs : 400;
+        int steps = Math.max(2, (int) (dur / 16));
+        MotionEvent.PointerProperties[] pp =
+                new MotionEvent.PointerProperties[2];
+        for (int i = 0; i < 2; i++) {
+            pp[i] = new MotionEvent.PointerProperties();
+            pp[i].id = i;
+            pp[i].toolType = MotionEvent.TOOL_TYPE_FINGER;
+        }
+        MotionEvent.PointerProperties[] pp1 =
+                new MotionEvent.PointerProperties[]{pp[0]};
+        MotionEvent e;
+        // finger 0 down
+        e = MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN,
+                1, pp1, new MotionEvent.PointerCoords[]{
+                        touchCoords(cx - dStart / 2, cy)},
+                0, 0, 1, 1, 0, 0, 0, 0);
+        try { w.dispatchTouchEvent(e); } finally { e.recycle(); }
+        // finger 1 down
+        e = MotionEvent.obtain(down, SystemClock.uptimeMillis(),
+                MotionEvent.ACTION_POINTER_DOWN
+                        | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+                2, pp, new MotionEvent.PointerCoords[]{
+                        touchCoords(cx - dStart / 2, cy),
+                        touchCoords(cx + dStart / 2, cy)},
+                0, 0, 1, 1, 0, 0, 0, 0);
+        try { w.dispatchTouchEvent(e); } finally { e.recycle(); }
+        // spread / pinch moves
+        for (int i = 1; i <= steps; i++) {
+            float d = dStart + (dEnd - dStart) * i / steps;
+            sleepQuiet(16);
+            e = MotionEvent.obtain(down, SystemClock.uptimeMillis(),
+                    MotionEvent.ACTION_MOVE, 2, pp,
+                    new MotionEvent.PointerCoords[]{
+                            touchCoords(cx - d / 2, cy),
+                            touchCoords(cx + d / 2, cy)},
+                    0, 0, 1, 1, 0, 0, 0, 0);
+            try { w.dispatchTouchEvent(e); } finally { e.recycle(); }
+        }
+        // finger 1 up
+        e = MotionEvent.obtain(down, SystemClock.uptimeMillis(),
+                MotionEvent.ACTION_POINTER_UP
+                        | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+                2, pp, new MotionEvent.PointerCoords[]{
+                        touchCoords(cx - dEnd / 2, cy),
+                        touchCoords(cx + dEnd / 2, cy)},
+                0, 0, 1, 1, 0, 0, 0, 0);
+        try { w.dispatchTouchEvent(e); } finally { e.recycle(); }
+        // finger 0 up
+        e = MotionEvent.obtain(down, SystemClock.uptimeMillis(),
+                MotionEvent.ACTION_UP, 1, pp1,
+                new MotionEvent.PointerCoords[]{
+                        touchCoords(cx - dEnd / 2, cy)},
+                0, 0, 1, 1, 0, 0, 0, 0);
+        try { w.dispatchTouchEvent(e); } finally { e.recycle(); }
+    }
+
+    private MotionEvent.PointerCoords touchCoords(float x, float y) {
+        MotionEvent.PointerCoords c = new MotionEvent.PointerCoords();
+        c.x = x;
+        c.y = y;
+        c.pressure = 1;
+        c.size = 1;
+        return c;
     }
 
     /** Synthesized touch sequence on a WebView. Runs on the UI thread

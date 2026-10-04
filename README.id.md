@@ -151,8 +151,11 @@ JavaScript, dan network log per tab — tanpa perlu agent. Tombol fullscreen vid
 > pun bisa di-upload, nggak perlu pindah ke shared storage dulu.
 > `blocklist add <pola>` buat blokir request dari Python/CLI.
 >
-> `touch tap|swipe|longpress` (APK 1.20+): tap/swipe sintetis via MotionEvent
-> — buat elemen yang `click()` JS nggak bisa drive (canvas, map, gesture).
+> `touch tap|swipe|longpress|pinch` (APK 1.21+): tap/swipe sintetis via
+> MotionEvent — buat elemen yang `click()` JS nggak bisa drive (canvas, map,
+> gesture). Selector-nya sama pintarnya kayak `click`: CSS, XPath, `@ref`
+> a11y, atau teks visible (`touch tap "Putar"`). `pinch_in`/`pinch_out`
+> buat zoom peta.
 >
 > Polish: `press Enter` otomatis submit form beneran kalau synthetic key-nya
 > nggak ngapa-ngapain (cek: nggak ada navigasi + request baru); `har export`

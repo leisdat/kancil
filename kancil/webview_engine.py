@@ -1197,24 +1197,37 @@ class WebViewEngine:
             return {"success": False, "errors": [str(e)[:150]]}
 
     def touch(self, action="tap", x=None, y=None, x2=None, y2=None,
-              selector=None, duration_ms=None):
-        """Synthesized touch (agent 1.20+): tap / swipe / longpress.
+              selector=None, duration_ms=None, distance_start=None,
+              distance_end=None):
+        """Synthesized touch (agent 1.21+): tap / swipe / longpress / pinch.
 
         Coordinates are CSS px (like getBoundingClientRect); the app
-        converts to view pixels. Pass selector to tap an element's center.
+        converts to view pixels. selector uses the engine's standard
+        targeting: CSS, XPath, @a11y ref, or visible text ("Putar") —
+        same as click(). pinch_in/pinch_out zoom around (x, y).
         For things JS click() can't drive: canvas, maps, custom gestures.
         """
         try:
+            if action in ("pinch_in", "pinch_out"):
+                action, distance_start, distance_end = (
+                    "pinch",
+                    420 if action == "pinch_in" else 120,
+                    120 if action == "pinch_in" else 420,
+                ) if distance_start is None else (
+                    "pinch", distance_start, distance_end)
             if selector and (x is None or y is None):
+                # standard targeting (CSS/XPath/@ref/text, pierces shadow
+                # DOM) -> element center. Note: rect is in the element's
+                # own frame; cross-frame elements may be offset.
                 r = self.evaluate(
-                    "(function(){var el=document.querySelector(%s);"
+                    "(function(){var el=%s;"
                     "if(!el) return null;var b=el.getBoundingClientRect();"
                     "return b.left+b.width/2+','+b.top+b.height/2;})()"
-                    % json.dumps(selector))
+                    % self._target_js(selector))
                 res = (r.get("result") or "").strip().strip('"')
                 if not res or res == "null":
                     return {"success": False,
-                            "errors": ["selector not found: %s" % selector]}
+                            "errors": ["no element matches %r" % (selector,)]}
                 try:
                     px, py = res.split(",")
                     x, y = float(px), float(py)
@@ -1232,6 +1245,10 @@ class WebViewEngine:
                 body["y2"] = y2
             if duration_ms:
                 body["duration_ms"] = duration_ms
+            if distance_start is not None:
+                body["distance_start"] = distance_start
+            if distance_end is not None:
+                body["distance_end"] = distance_end
             r = self._post("/touch", body)
             if isinstance(r, dict) and r.get("ok"):
                 return {"success": True, "action": r.get("action", action),

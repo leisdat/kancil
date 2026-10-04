@@ -179,7 +179,9 @@ kancil --engine webview upload ./photo.jpg   # file upload (base64, agent 1.19+)
 kancil --engine webview blocklist add ads.com tracker.io  # block requests
 kancil --engine webview console               # JS console logs
 kancil --engine webview touch tap --selector "#play"  # synthesized tap
+kancil --engine webview touch tap "Putar"     # visible text also works
 kancil --engine webview touch swipe --x 100 --y 800 --x2 100 --y2 200
+kancil --engine webview touch pinch_out --x 540 --y 900  # map zoom
 kancil --engine webview press Enter  # synthetic Enter; auto-submit form kalau key nggak ngapa-ngapain
 kancil --engine webview press Enter --no-submit-fallback  # tanpa auto-submit
 kancil --engine webview find "kata kunci"  # find-in-page: highlight + match count

@@ -3,31 +3,14 @@
 ## Unreleased
 
 ### Added
-- **Resilience & captcha helpers** (webview engine, farm-grade):
-  `ensure_alive()` — auto-relaunch APK saat Android kill app (Connection
-  refused → `am start` → poll); `wait_ready()` — anti tab-hang
-  (`readyState` stuck `loading`, auto-reload setelah `reload_after`s);
-  `click_button(text)` — klik button by visible text (React/Next friendly,
-  nggak butuh selector stabil); `has_button(text)`; `wait_token()` — polling
-  hidden `cf-turnstile-response` sampai keisi (Turnstile auto-solve 3-8s
-  di WebView trusted); `submit_with_captcha()` — flow 2-klik: submit pertama
-  render widget, token keisi, submit kedua pass; `type_verified()` — type()
-  + verify nilai beneran nempel (anti React controlled-input drop).
-- Unit tests untuk semua helper baru (15 test).
-- **Auto-heal otomatis**: `ensure_alive()` kini dipanggil otomatis oleh engine
-  — saat init dan setiap request yang gagal connect (sekali per request,
-  dengan guard anti-rekursi) — plus re-sync tab setelah relaunch. CLI
-  `kancil --engine webview launch`, flag `--no-auto-launch` untuk opt-out,
-  API `Kancil.ensure_alive()` / `webview_auto_launch=False`.
-
-## 3.14.0
-
-### Added
-- **`/touch` endpoint** (APK agent 1.20): tap / swipe / longpress sintetis
-  via `MotionEvent` → `dispatchTouchEvent()` — koordinat CSS px (app konversi
-  pakai skala WebView). Python `touch(action, x, y, x2, y2, selector,
-  duration_ms)`, API `Kancil.touch()`, CLI `kancil touch`. Untuk elemen yang
-  `click()` JS tidak bisa drive (canvas, map, custom gesture).
+- **`/touch` endpoint** (APK agent 1.21): tap / swipe / longpress /
+  pinch sintetis via `MotionEvent` → `dispatchTouchEvent()` — koordinat CSS
+  px (app konversi pakai skala WebView). Python `touch(action, x, y, x2,
+  y2, selector, duration_ms, distance_start, distance_end)` dengan targeting
+  standar engine (CSS, XPath, `@ref` a11y, teks visible — semudah `click()`),
+  plus `pinch_in`/`pinch_out` buat zoom peta. API `Kancil.touch()`, CLI
+  `kancil touch`. Untuk elemen yang `click()` JS tidak bisa drive (canvas,
+  map, custom gesture).
 - **Upload base64** (APK agent 1.19): `POST /upload` terima `{filename, data}`
   base64 selain `{path}` — file dari direktori privat Termux bisa di-upload
   langsung; Python `upload()` selalu kirim base64 (fallback path-staging

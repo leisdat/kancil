@@ -390,10 +390,11 @@ def build_parser():
                     choices=["status", "add", "clear"])
     bl.add_argument("patterns", nargs="*")
 
-    tc = SP("touch", help="synthesized touch: tap / swipe / longpress "
-            "(webview engine, agent 1.20+)")
+    tc = SP("touch", help="synthesized touch: tap / swipe / longpress / "
+            "pinch (webview engine, agent 1.21+)")
     tc.add_argument("action", nargs="?", default="tap",
-                    choices=["tap", "swipe", "longpress"])
+                    choices=["tap", "swipe", "longpress", "pinch",
+                             "pinch_in", "pinch_out"])
     tc.add_argument("--x", type=float, default=None)
     tc.add_argument("--y", type=float, default=None)
     tc.add_argument("--x2", type=float, default=None)
