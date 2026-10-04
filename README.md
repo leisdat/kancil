@@ -11,9 +11,9 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-3.14.0-brightgreen" alt="version">
-  <img src="https://img.shields.io/badge/tests-201%20unit%20%2B%205%20live-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/tests-240%20unit-brightgreen" alt="tests">
   <img src="https://img.shields.io/badge/size-%7E100%20KB-blue" alt="size">
-  <img src="https://img.shields.io/badge/dependencies-0-blue" alt="zero deps">
+  <img src="https://img.shields.io/badge/dependencies-0%20required-blue" alt="zero required deps">
   <img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="python">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="license">
   <a href="README.id.md"><img src="https://img.shields.io/badge/README-Bahasa%20Indonesia-red" alt="indonesian"></a>
@@ -21,7 +21,12 @@
 
 > A **browser built for AI agents** — navigation, DOM, DevTools, scraping,
 > and a real-browser driving layer, all through a JSON-in/JSON-out interface.
-> **~100 KB, zero dependencies.** Runs on Termux (Android ARM64), Linux, macOS.
+> **~100 KB, zero required dependencies.** Runs on Termux (Android ARM64), Linux, macOS.
+
+✨ **New:** TLS fingerprint impersonation (`kancil stealth impersonate`,
+6 browser profiles) · WebView anti-detect JS injection · `kancil session clear`
+with per-domain cookie wipe · APK agent 1.17 (`/cookies/clear`, `/cache/clear`)
+· `click(..., verify=...)` validator pattern · stealth status in `kancil doctor`.
 
 ```bash
 pip install -e .
@@ -80,7 +85,7 @@ full playback realistically needs a logged-in session).
 screenshots, PDF. Same API. Auto-detects Camoufox on Termux.
 
 **📱 WebView engine (new)** — `--engine webview` drives the
-**Kancil Browser** Android app (`android/`, ~90 KB APK) on the same phone:
+**Kancil Browser** Android app (`android/`, ~96 KB APK) on the same phone:
 real Chromium via System WebView. Log in / solve captchas once in the app,
 the Termux agent reuses that live session. Element queries pierce shadow DOM
 + same-origin iframes (cross-origin frames are unreachable by same-origin
@@ -193,7 +198,8 @@ $ python3 -m unittest tests.test_live      # needs network + chromium
 
 ## Stealth (browser impersonation)
 
-Two opt-in layers, both dependency-light (`curl_cffi` is optional):
+Two opt-in layers, both dependency-light (`curl_cffi` is optional —
+without it the engine silently falls back to urllib):
 
 ```bash
 kancil stealth status                        # profiles, active transport
@@ -205,19 +211,6 @@ kancil --impersonate tor open https://...    # one-shot via CLI flag
 kancil stealth apply                         # webview engine: inject anti-detect
                                              # JS (webdriver, canvas, WebGL, ...)
 ```
-
-## Session clear
-
-```bash
-kancil session clear                          # wipe everything
-kancil session clear --what cookies           # cookies only
-kancil session clear --what cookies --domain example.com  # one site only
-```
-
-Static engine wipes cookies (incl. the impersonated session jar), tabs,
-netlog and cache. Webview closes tabs, clears netlog + WebView cache;
-`all` never touches cookies (they hold your logins) — pass
-`--what cookies` explicitly to wipe them (needs APK agent 1.17+).
 
 ```python
 from kancil.api import Kancil
@@ -231,6 +224,19 @@ stealth.apply_stealth(webview_engine)  # re-apply after each navigation
 Injection-based spoofing covers the common fingerprinting vectors but can't
 match engine-level patching (Camoufox-style) — a sophisticated checker can
 still detect it. Kancil stays small on purpose.
+
+## Session clear
+
+```bash
+kancil session clear                          # wipe everything
+kancil session clear --what cookies           # cookies only
+kancil session clear --what cookies --domain example.com  # one site only
+```
+
+Static engine wipes cookies (incl. the impersonated session jar), tabs,
+netlog and cache. Webview closes tabs, clears netlog + WebView cache;
+`all` never touches cookies (they hold your logins) — pass
+`--what cookies` explicitly to wipe them (needs APK agent 1.17+).
 
 ## Project layout
 
