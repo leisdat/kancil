@@ -10,6 +10,7 @@ EngineError instead of pretending to work.
 import json
 import os
 import re
+import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -1297,3 +1298,235 @@ class WebViewEngine:
 
     def close(self):
         pass
+
+    # ---------- resilience & captcha helpers (farm-grade) ----------
+    # Added for real-world sessions: tab hangs, app kills, React forms,
+    # and Turnstile auto-solve flows found during TokenHarbor testing.
+
+    APP_PACKAGE = "com.kancil.browser"
+    APP_ACTIVITY = "com.kancil.browser/.MainActivity"
+
+    def ensure_alive(self, retries=2, relaunch=True, wait=1.5):
+        """Check the app agent is reachable; optionally relaunch it.
+
+        Android kills background WebView apps under memory pressure —
+        Connection refused means the agent is gone, not that the engine
+        is broken. If `relaunch` is true and /status fails, fire
+        `am start` (Android only) and poll until it answers again.
+        """
+        for attempt in range(retries + 1):
+            try:
+                st = self._get("/status")
+                if isinstance(st, dict) and st.get("ok"):
+                    return {"success": True, "agent": st.get("agent"),
+                            "relaunched": attempt > 0}
+                raise Exception("bad /status: %s" % str(st)[:120])
+            except Exception as e:
+                if attempt >= retries or not relaunch:
+                    return {"success": False,
+                            "errors": [str(e)[:200]]}
+                try:
+                    subprocess.run(
+                        ["am", "start", "-n", self.APP_ACTIVITY],
+                        capture_output=True, timeout=8)
+                except Exception:
+                    pass  # not Android / no `am` — give up quietly
+                end = time.time() + 8
+                while time.time() < end:
+                    time.sleep(wait)
+                    try:
+                        return self.ensure_alive(retries=0,
+                                                 relaunch=False)
+                    except Exception:
+                        pass
+        return {"success": False, "errors": ["unreachable"]}
+
+    def wait_ready(self, timeout=25, poll=0.7, auto_reload=True,
+                   reload_after=10):
+        """Wait until the page reaches readyState 'complete'.
+
+        The APK can hang in `loading` forever (renderer stall) — this
+        polls, and if still loading after `reload_after` seconds it
+        triggers /reload once and keeps waiting. Returns the final
+        readyState; success=False on timeout (caller may open a fresh
+        tab instead of fighting the stale one).
+        """
+        end = time.time() + timeout
+        reloaded = False
+        last_state = "?"
+        while time.time() < end:
+            try:
+                r = self._post("/js", {"expr":
+                    "JSON.stringify({ready: document.readyState, "
+                    "len: document.body ? document.body.innerText.length : -1})"})
+                raw = r.get("result", "{}")
+                try:
+                    d = json.loads(raw)
+                except Exception:
+                    d = {}
+                last_state = d.get("ready", "?")
+                if last_state == "complete" and int(d.get("len", 0)) >= 0:
+                    return {"success": True, "ready": "complete",
+                            "body_len": d.get("len")}
+            except Exception:
+                pass
+            if auto_reload and not reloaded and \
+                    time.time() - (end - timeout) > reload_after:
+                try:
+                    self._post("/reload", {})
+                except Exception:
+                    pass
+                reloaded = True
+            time.sleep(poll)
+        return {"success": False, "ready": last_state,
+                "errors": ["tab appears stuck in %r — open a fresh tab"
+                           % last_state]}
+
+    def has_button(self, text, exact=True, partial=True):
+        """True if a <button>/[role=button] with innerText exists."""
+        try:
+            r = self._post("/js", {"expr":
+                '''(function(){
+                  var hay=[...document.querySelectorAll(
+                    'button,[role=button],[data-testid*=button]')]
+                    .map(b=>(b.innerText||b.value||'').trim())
+                    .filter(Boolean);
+                  var t=%s;
+                  if(%s) return hay.some(x=>x===t)?1:0;
+                  return hay.some(x=>x.indexOf(t)>=0)?1:0;
+                })()''' % (json.dumps(text),
+                           "true" if exact else "false")})
+            return r.get("result") == "1"
+        except Exception:
+            return False
+
+    def click_button(self, text, exact=True, wait_ms=300):
+        """Click a button by its visible text (React/Next friendly).
+
+        Handles the common Next.js/React signup forms where buttons have
+        no stable id. Returns not-found if no button matches, so callers
+        can branch instead of guessing selectors.
+        """
+        flags = ("true" if exact else "false", "true")
+        try:
+            r = self._post("/js", {"expr":
+                '''(function(){
+                  var t=%s;
+                  var found=null;
+                  var all=[...document.querySelectorAll(
+                    'button,[role=button]')];
+                  for (var i=0;i<all.length;i++){
+                    var x=(all[i].innerText||all[i].value||'').trim();
+                    if (%s ? x===t : x.indexOf(t)>=0){found=all[i];break;}
+                  }
+                  if(!found) return 'not-found';
+                  found.scrollIntoView({block:'center'});
+                  found.click();
+                  return 'clicked';
+                })()''' % (json.dumps(text), flags[0])})
+            res = r.get("result")
+            if res == "not-found":
+                return {"success": False,
+                        "errors": ["no button with text %r" % text]}
+            if wait_ms:
+                time.sleep(wait_ms / 1000.0)
+            self._invalidate()
+            return {"success": True, "button": text, "clicked": res}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def wait_token(self, selector='input[name=cf-turnstile-response]',
+                   min_len=100, timeout=30, poll=1.0):
+        """Wait until a hidden token input is populated (Turnstile flow).
+
+        Cloudflare Turnstile renders the widget after form submit and
+        fills a hidden input 3-8s later on trusted WebViews. Polls until
+        value length >= min_len. Returns token length + head preview.
+        """
+        end = time.time() + timeout
+        n = -1
+        while time.time() < end:
+            try:
+                r = self._post("/js", {"expr":
+                    '''(function(){
+                      var el=document.querySelector(%s);
+                      return el ? el.value.length : -1;
+                    })()''' % json.dumps(selector)})
+                n = int(r.get("result") or -1)
+            except Exception:
+                n = -1
+            if n >= min_len:
+                head = ""
+                try:
+                    r = self._post("/js", {"expr":
+                        '''(function(){
+                          var el=document.querySelector(%s);
+                          return el ? el.value.slice(0,18) : '';
+                        })()''' % json.dumps(selector)})
+                    head = str(r.get("result") or "")
+                except Exception:
+                    pass
+                return {"success": True, "token_len": n,
+                        "token_head": head}
+            time.sleep(poll)
+        return {"success": False, "token_len": n,
+                "errors": ["token input %r never reached %d chars"
+                           % (selector, min_len)]}
+
+    def submit_with_captcha(self, button_text="Create account",
+                            token_selector='input[name=cf-turnstile-response]',
+                            settle=5, timeout=30, success_url_sub=None):
+        """Two-step form submit for sites with post-click Turnstile.
+
+        Flow observed on TokenHarbor: click submit -> widget renders ->
+        token fills in 3-8s -> clicking submit again with a populated
+        token passes. This encapsulates that dance and returns which
+        step failed if any.
+        """
+        out = {"step1_click": False, "token": None, "step2_click": False}
+        r1 = self.click_button(button_text)
+        out["step1_click"] = r1.get("success", False)
+        if not r1.get("success"):
+            if "not-found" in " ".join(r1.get("errors", [])):
+                return {**out, "success": False,
+                        "phase": "button-missing",
+                        "errors": r1.get("errors")}
+        tok = self.wait_token(selector=token_selector, timeout=timeout)
+        out["token"] = tok.get("success", False)
+        if not tok.get("success"):
+            return {**out, "success": False, "phase": "token",
+                    "errors": tok.get("errors")}
+        if settle:
+            time.sleep(settle)
+        r2 = self.click_button(button_text, wait_ms=400)
+        out["step2_click"] = r2.get("success", False)
+        if not r2.get("success"):
+            return {**out, "success": False, "phase": "submit",
+                    "errors": r2.get("errors")}
+        out["success"] = True
+        return out
+
+    def type_verified(self, query, text, attempts=2, poll=0.5):
+        """type() + verify the value actually landed.
+
+        React controlled inputs can silently drop synthetic values; this
+        types, reads back, and retries once if the DOM value doesn't
+        match. Returns success only when verified.
+        """
+        for _ in range(max(attempts, 1)):
+            r = self.type(query, text)
+            if not r.get("success"):
+                return r
+            time.sleep(poll)
+            got = ""
+            try:
+                v = self._post("/js", {"expr":
+                    "(function(){var el=%s;if(!el)return '';"
+                    "return el.value||''})()" % self._target_js(query)})
+                got = str(v.get("result") or "")
+            except Exception:
+                got = ""
+            if got == (text or ""):
+                return {"success": True, "value": got}
+        return {"success": False,
+                "errors": ["value did not stick: got %r" % got[:60]]}

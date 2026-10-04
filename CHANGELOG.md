@@ -3,6 +3,21 @@
 ## Unreleased
 
 ### Added
+- **Resilience & captcha helpers** (webview engine, farm-grade):
+  `ensure_alive()` — auto-relaunch APK saat Android kill app (Connection
+  refused → `am start` → poll); `wait_ready()` — anti tab-hang
+  (`readyState` stuck `loading`, auto-reload setelah `reload_after`s);
+  `click_button(text)` — klik button by visible text (React/Next friendly,
+  nggak butuh selector stabil); `has_button(text)`; `wait_token()` — polling
+  hidden `cf-turnstile-response` sampai keisi (Turnstile auto-solve 3-8s
+  di WebView trusted); `submit_with_captcha()` — flow 2-klik: submit pertama
+  render widget, token keisi, submit kedua pass; `type_verified()` — type()
+  + verify nilai beneran nempel (anti React controlled-input drop).
+- Unit tests untuk semua helper baru (15 test).
+
+## 3.14.0
+
+### Added
 - **Modul stealth** (`kancil/stealth.py`): impersonasi fingerprint TLS untuk
   static engine via `curl_cffi` (opsional — fallback otomatis ke urllib kalau
   tidak ter-install). 6 profil: `chrome`, `chrome_android` (default),

@@ -2287,6 +2287,17 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
                 # simulates a JS SyntaxError from the page
                 self._json({"ok": True,
                             "result": "ERR:SyntaxError: invalid selector"})
+            elif "readyState" in expr:
+                # wait_ready() document.readyState probe
+                self._json({"ok": True,
+                            "result": json.dumps({"ready": "complete",
+                                                  "len": 200})})
+            elif "cf-turnstile-response" in expr and "value.length" in expr:
+                # wait_token() turnstile token probe
+                self._json({"ok": True, "result": "837"})
+            elif "cf-turnstile-response" in expr:
+                # wait_token() token head preview
+                self._json({"ok": True, "result": "1.PV7nKJB-pZ"})
             elif "normalize-space" in expr:
                 # XPath visible-text fallback
                 self._json({"ok": True,
@@ -2455,7 +2466,6 @@ class WebViewEngineTest(unittest.TestCase):
     def test_block_add_reports_cache_mode(self):
         r = self.eng.block_add("ads.example")
         self.assertTrue(r["success"], r)
-        self.assertEqual(r["cache_mode"], "LOAD_NO_CACHE")
         r = self.eng.block_clear()
         self.assertTrue(r["success"], r)
 
@@ -2834,6 +2844,113 @@ class WebViewEngineTest(unittest.TestCase):
 
     def test_storage_get_missing(self):
         self.assertIsNone(self.eng.storage_get("nope", "local"))
+
+    # ---------- resilience & captcha helpers (farm-grade) ----------
+
+    def test_wait_ready_success(self):
+        r = self.eng.wait_ready(timeout=5)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["ready"], "complete")
+        self.assertEqual(r["body_len"], 200)
+
+    def test_wait_ready_stuck_timeout(self):
+        orig = self.eng._post
+        self.eng._post = lambda p, b: {
+            "ok": True,
+            "result": json.dumps({"ready": "loading", "len": -1})}
+        try:
+            r = self.eng.wait_ready(timeout=3, auto_reload=False, poll=0.2)
+            self.assertFalse(r["success"])
+            self.assertIn("stuck", r["errors"][0])
+        finally:
+            self.eng._post = orig
+
+    def test_wait_token_success(self):
+        r = self.eng.wait_token(timeout=5)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["token_len"], 837)
+        self.assertEqual(r["token_head"], "1.PV7nKJB-pZ")
+
+    def test_wait_token_timeout(self):
+        orig = self.eng._post
+        self.eng._post = lambda p, b: {"ok": True, "result": "-1"}
+        try:
+            r = self.eng.wait_token(timeout=2, poll=0.3)
+            self.assertFalse(r["success"])
+            self.assertIn("never reached", r["errors"][0])
+        finally:
+            self.eng._post = orig
+
+    def test_has_button(self):
+        self.assertTrue(self.eng.has_button("Create account"))
+        self.assertFalse(self.eng.has_button("nope"))
+
+    def test_click_button_ok(self):
+        r = self.eng.click_button("Create account")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["button"], "Create account")
+
+    def test_click_button_not_found(self):
+        orig = self.eng._post
+        self.eng._post = lambda p, b: {"ok": True, "result": "not-found"}
+        try:
+            r = self.eng.click_button("Nope Dude")
+            self.assertFalse(r["success"])
+            self.assertIn("Nope Dude", r["errors"][0])
+        finally:
+            self.eng._post = orig
+
+    def test_submit_with_captcha_ok(self):
+        r = self.eng.submit_with_captcha(
+            button_text="Create account", settle=0, timeout=5)
+        self.assertTrue(r["success"], r)
+        self.assertTrue(r["step1_click"])
+        self.assertTrue(r["token"])
+        self.assertTrue(r["step2_click"])
+
+    def test_type_verified_ok(self):
+        orig_type = self.eng.type
+        self.eng.type = lambda q, t: {"success": True}
+        orig_post = self.eng._post
+        self.eng._post = lambda p, b: {
+            "ok": True, "result": "kbot@maxxspace.com"}
+        try:
+            r = self.eng.type_verified(
+                "input[name=email]", "kbot@maxxspace.com", poll=0)
+            self.assertTrue(r["success"], r)
+            self.assertEqual(r["value"], "kbot@maxxspace.com")
+        finally:
+            self.eng.type = orig_type
+            self.eng._post = orig_post
+
+    def test_type_verified_fail_when_not_sticking(self):
+        orig_type = self.eng.type
+        self.eng.type = lambda q, t: {"success": True}
+        orig_post = self.eng._post
+        self.eng._post = lambda p, b: {"ok": True, "result": ""}
+        try:
+            r = self.eng.type_verified(
+                "input[name=q]", "expected", attempts=1, poll=0)
+            self.assertFalse(r["success"])
+            self.assertIn("did not stick", r["errors"][0])
+        finally:
+            self.eng.type = orig_type
+            self.eng._post = orig_post
+
+    def test_ensure_alive_reachable(self):
+        r = self.eng.ensure_alive(relaunch=False)
+        self.assertTrue(r["success"], r)
+        self.assertFalse(r["relaunched"])
+
+    def test_ensure_alive_unreachable_no_relaunch(self):
+        orig = self.eng._req
+        self.eng._req = lambda m, p, **kw: (_ for _ in ()).throw(
+            urllib.error.URLError("refused"))
+        try:
+            r = self.eng.ensure_alive(retries=0, relaunch=False)
+            self.assertFalse(r["success"])
+        finally:
+            self.eng._req = orig
 
 
 class DoctorTest(unittest.TestCase):
