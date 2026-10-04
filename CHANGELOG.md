@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- **Aliyun closed-loop slider solver** (APK agent 1.24): port pendekatan
+  0xgetz/aliyun-puzzle-solver (MIT) — deteksi gap via analisis pixel
+  in-page (gray veil: saturasi rendah + brightness mid/high), lalu drag
+  closed-loop: `/touch down` → loop `move` kecil (3–14px, ~32ms) sambil
+  baca `style.left` tiap step, berhenti di target → `up`. Primitif touch
+  baru `down`/`move`/`up` (satu downTime per gesture, diingat per tab).
+  Python `kancil/aliyun.py` + API `Kancil.solve_aliyun_puzzle()` + CLI
+  `kancil aliyun-solve`. Tanpa garansi — arms race; Descope lockout 5x/180
+  dtk (max_tries default 4).
 - **Response-body capture** (APK agent 1.23): `/network` tidak cuma metadata
   lagi — semua response XHR/fetch direkam (64KB cap, 60 terakhir per tab)
   via patch `fetch`/XHR di JS. Jalur aman: observe-only, tanpa
