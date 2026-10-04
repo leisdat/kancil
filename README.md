@@ -187,6 +187,8 @@ kancil --engine webview touch swipe --x 100 --y 500 --x2 400 --y 500 --human
 # ^ human-like swipe (bezier, ease-in-out) for behavior-checked sliders
 kancil --engine webview network bodies          # captured XHR/fetch bodies
 kancil --engine webview network response 12     # body of netlog entry (JSON pretty)
+kancil --engine webview aliyun-solve            # closed-loop Aliyun slider solver
+kancil --engine webview aliyun-analyze          # dry-run gap detection (tuning)
 kancil --engine webview press Enter  # synthetic Enter; auto-submit form kalau key nggak ngapa-ngapain
 kancil --engine webview press Enter --no-submit-fallback  # tanpa auto-submit
 kancil --engine webview find "kata kunci"  # find-in-page: highlight + match count

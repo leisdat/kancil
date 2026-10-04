@@ -3828,11 +3828,14 @@ class AliyunSolverTest(unittest.TestCase):
                                 "puzzleW": 296, "left": self.left}))}
             if "style.left" in js:
                 return {"success": True, "result": '"%s"' % self.left}
+            if "aliyun-captcha-widget" in js and "getBoundingClientRect" in js:
+                return {"success": True, "result": json.dumps(
+                    json.dumps({"x": 200.0, "y": 400.0}))}
             if "aliyunCaptcha-mask" in js:
+                gone = (self.mask_gone_at is not None and
+                        self.calls >= self.mask_gone_at)
                 return {"success": True,
-                        "result": '"true"'
-                        if self.mask_gone_at is not None and
-                        self.calls >= self.mask_gone_at else '"false"'}
+                        "result": '"gone"' if gone else '"present"'}
             return {"success": True, "result": '"null"'}
 
         def touch(self, action, x=None, y=None, **kw):
@@ -3878,9 +3881,51 @@ class AliyunSolverTest(unittest.TestCase):
         eng = self.FakeEng()
         eng.evaluate = lambda js: {"success": True,
                                    "result": '"null"'}
-        r = aliyun.solve_aliyun_puzzle(eng, max_tries=1, verbose=False)
+        r = aliyun.solve_aliyun_puzzle(eng, max_tries=1, verbose=False,
+                                       enable_traceless=False)
         self.assertFalse(r["ok"])
         self.assertIn("not ready", r["reason"])
+
+    def test_analyze_dry_run(self):
+        from kancil import aliyun
+        eng = self.FakeEng()
+        r = aliyun.analyze_aliyun(eng, verbose=False)
+        self.assertTrue(r["ok"], r)
+        self.assertAlmostEqual(r["analysis"]["targetLeft"], 120.0)
+        self.assertEqual(eng.touches, [])  # no dragging
+
+    def test_traceless_fallback(self):
+        from kancil import aliyun
+        eng = self.FakeEng()
+        # no slider handle anywhere, but widget exists
+        orig = eng.evaluate
+        def no_handle(js):
+            if "slider-move" in js or "nc_icon" in js:
+                return {"success": True, "result": '"null"'}
+            return orig(js)
+        eng.evaluate = no_handle
+        eng.mask_gone_at = 0
+        r = aliyun.solve_aliyun_puzzle(eng, max_tries=1, verbose=False)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["mode"], "traceless")
+        self.assertEqual(eng.touches[0][0], "tap")
+
+    def test_refresh_attempted_on_implausible(self):
+        from kancil import aliyun
+        eng = self.FakeEng()
+        eng.target = 5000.0
+        # mock a refresh icon near the puzzle
+        orig = eng.evaluate
+        def with_refresh(js):
+            if "getBoundingClientRect" in js and "cs[cs.length-1]" in js:
+                return {"success": True, "result": json.dumps(
+                    json.dumps({"x": 280.0, "y": 100.0}))}
+            return orig(js)
+        eng.evaluate = with_refresh
+        r = aliyun.solve_aliyun_puzzle(eng, max_tries=1, verbose=False)
+        self.assertFalse(r["ok"])
+        taps = [t for t in eng.touches if t[0] == "tap"]
+        self.assertTrue(taps)  # refresh was tapped
 
     def test_cli_parses(self):
         from kancil import cli as cli_mod
@@ -3888,3 +3933,5 @@ class AliyunSolverTest(unittest.TestCase):
         a = p.parse_args(["aliyun-solve", "--max-tries", "2"])
         self.assertEqual(a.max_tries, 2)
         self.assertEqual(a.handle_sel, ".slider-move")
+        b = p.parse_args(["aliyun-analyze"])
+        self.assertIsNone(b.handle_sel)

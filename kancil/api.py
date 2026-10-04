@@ -446,6 +446,14 @@ class Kancil:
                     self, max_tries=max_tries, handle_sel=handle_sel,
                     puzzle_sel=puzzle_sel, verbose=verbose)}
 
+    def aliyun_analyze(self, handle_sel=None, puzzle_sel=None):
+        """Dry-run Aliyun gap detection (no dragging). For tuning."""
+        from kancil import aliyun as _al
+        return {"success": True,
+                **_al.analyze_aliyun(
+                    self, handle_sel=handle_sel,
+                    puzzle_sel=puzzle_sel, verbose=True)}
+
     def network_curl(self, rid):
         """Replay a logged request as a copy-pasteable curl command."""
         import shlex

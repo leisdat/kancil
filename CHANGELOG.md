@@ -10,8 +10,10 @@
   baca `style.left` tiap step, berhenti di target → `up`. Primitif touch
   baru `down`/`move`/`up` (satu downTime per gesture, diingat per tab).
   Python `kancil/aliyun.py` + API `Kancil.solve_aliyun_puzzle()` + CLI
-  `kancil aliyun-solve`. Tanpa garansi — arms race; Descope lockout 5x/180
-  dtk (max_tries default 4).
+  `kancil aliyun-solve`. Full fitur (Python-only): auto-detect selector,
+  refresh-on-fail, fallback traceless, `aliyun-analyze` dry-run, timing
+  adaptif, verifikasi mask hilang / teks sukses. Tanpa garansi — arms
+  race; Descope lockout 5x/180 dtk (max_tries default 4).
 - **Response-body capture** (APK agent 1.23): `/network` tidak cuma metadata
   lagi — semua response XHR/fetch direkam (64KB cap, 60 terakhir per tab)
   via patch `fetch`/XHR di JS. Jalur aman: observe-only, tanpa

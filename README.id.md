@@ -170,7 +170,13 @@ JavaScript, dan network log per tab — tanpa perlu agent. Tombol fullscreen vid
 > veil), lalu drag **closed-loop**: baca `style.left` tiap step kecil dan
 > berhenti pas target. Primitif `/touch` baru: `down`/`move`/`up` (satu
 > downTime per gesture). Tanpa garansi — arms race, dan Descope lockout
-> 5x/180 dtk.
+> 5x/180 dtk (max_tries default 4).
+>
+> Full fitur (Python-only, tanpa rebuild APK): auto-detect selector
+> handle/puzzle, refresh-on-fail (tap ikon refresh panel buat puzzle baru),
+> fallback traceless (tap click-to-verify kalau nggak ada slider),
+> `aliyun-analyze` buat dry-run tuning, timing adaptif tiap retry,
+> verifikasi mask hilang / teks sukses.
 >
 > Polish: `press Enter` otomatis submit form beneran kalau synthetic key-nya
 > nggak ngapa-ngapain (cek: nggak ada navigasi + request baru); `har export`

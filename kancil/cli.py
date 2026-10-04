@@ -256,6 +256,10 @@ def build_parser():
     al.add_argument("--max-tries", type=int, default=4)
     al.add_argument("--handle-sel", default=".slider-move")
     al.add_argument("--puzzle-sel", default="img.puzzle")
+    an = SP("aliyun-analyze",
+            help="dry-run Aliyun gap detection (no dragging)")
+    an.add_argument("--handle-sel", default=None)
+    an.add_argument("--puzzle-sel", default=None)
     net = SP("network", help="network log")
     net.add_argument("action", nargs="?", default="list")
     net.add_argument("target", nargs="?")
@@ -664,6 +668,9 @@ def dispatch(b, args):
         return b.solve_aliyun_puzzle(max_tries=args.max_tries,
                                      handle_sel=args.handle_sel,
                                      puzzle_sel=args.puzzle_sel)
+    if c == "aliyun-analyze":
+        return b.aliyun_analyze(handle_sel=args.handle_sel,
+                                puzzle_sel=args.puzzle_sel)
     if c == "network":
         if args.har:
             return b.har_export(args.har, redact=not args.no_redact)
