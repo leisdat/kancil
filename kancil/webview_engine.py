@@ -1196,6 +1196,50 @@ class WebViewEngine:
         except Exception as e:
             return {"success": False, "errors": [str(e)[:150]]}
 
+    def touch(self, action="tap", x=None, y=None, x2=None, y2=None,
+              selector=None, duration_ms=None):
+        """Synthesized touch (agent 1.20+): tap / swipe / longpress.
+
+        Coordinates are CSS px (like getBoundingClientRect); the app
+        converts to view pixels. Pass selector to tap an element's center.
+        For things JS click() can't drive: canvas, maps, custom gestures.
+        """
+        try:
+            if selector and (x is None or y is None):
+                r = self.evaluate(
+                    "(function(){var el=document.querySelector(%s);"
+                    "if(!el) return null;var b=el.getBoundingClientRect();"
+                    "return b.left+b.width/2+','+b.top+b.height/2;})()"
+                    % json.dumps(selector))
+                res = (r.get("result") or "").strip().strip('"')
+                if not res or res == "null":
+                    return {"success": False,
+                            "errors": ["selector not found: %s" % selector]}
+                try:
+                    px, py = res.split(",")
+                    x, y = float(px), float(py)
+                except ValueError:
+                    return {"success": False,
+                            "errors": ["bad rect: %s" % res[:60]]}
+            body = {"action": action}
+            if x is not None:
+                body["x"] = x
+            if y is not None:
+                body["y"] = y
+            if x2 is not None:
+                body["x2"] = x2
+            if y2 is not None:
+                body["y2"] = y2
+            if duration_ms:
+                body["duration_ms"] = duration_ms
+            r = self._post("/touch", body)
+            if isinstance(r, dict) and r.get("ok"):
+                return {"success": True, "action": r.get("action", action),
+                        "x": r.get("x"), "y": r.get("y")}
+            return {"success": False, "errors": [str(r)[:200]]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
     def upload(self, path):
         """Stage a file for the next file-chooser (input[type=file] click).
 

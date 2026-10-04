@@ -25,6 +25,8 @@ import android.webkit.JsResult;
 import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.view.MotionEvent;
+import android.os.SystemClock;
 import android.view.PixelCopy;
 import android.view.View;
 import android.view.ViewGroup;
@@ -1777,7 +1779,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.19");
+                            oo.put("agent", "kancil-browser/1.20");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -2427,6 +2429,67 @@ public class MainActivity extends Activity {
                     of.put("matches", matches.get());
                     return AgentServer.Response.json(of);
                 }
+                case "/touch": {
+                    // Synthesized touch (agent 1.20+): tap / swipe /
+                    // longpress via MotionEvent -> dispatchTouchEvent.
+                    // Coordinates are CSS px (like getBoundingClientRect);
+                    // converted to view px with the WebView scale here.
+                    // Worth it for things JS click() can't drive: canvas,
+                    // maps, custom gesture handlers.
+                    String tAction = body.optString("action", "");
+                    if (tAction.isEmpty() && query.get("action") != null)
+                        tAction = query.get("action");
+                    if (tAction.isEmpty()) tAction = "tap";
+                    final String fAction = tAction.toLowerCase();
+                    if (!fAction.equals("tap") && !fAction.equals("swipe")
+                            && !fAction.equals("longpress"))
+                        return AgentServer.Response.err(400,
+                                "action must be tap|swipe|longpress");
+                    String[] tkeys = {"x", "y", "x2", "y2"};
+                    final double[] tc = new double[4];
+                    for (int ti = 0; ti < 4; ti++) {
+                        double tv = -1;
+                        if (body.has(tkeys[ti])) tv = body.optDouble(tkeys[ti], -1);
+                        else if (query.get(tkeys[ti]) != null) {
+                            try { tv = Double.parseDouble(query.get(tkeys[ti])); }
+                            catch (Exception ignored) {}
+                        }
+                        tc[ti] = tv;
+                    }
+                    long tDur = body.optLong("duration_ms", 0);
+                    if (tDur == 0 && query.get("duration_ms") != null) {
+                        try { tDur = Long.parseLong(query.get("duration_ms")); }
+                        catch (Exception ignored) {}
+                    }
+                    if (tc[0] < 0 || tc[1] < 0)
+                        return AgentServer.Response.err(400,
+                                "missing x/y (CSS px)");
+                    if (fAction.equals("swipe") && (tc[2] < 0 || tc[3] < 0))
+                        return AgentServer.Response.err(400,
+                                "swipe needs x2/y2");
+                    final long fDur = tDur;
+                    try {
+                        uiGet(() -> {
+                            WebView w = activeWeb();
+                            float scale = w.getScale();
+                            float[] pts = {(float) (tc[0] * scale),
+                                           (float) (tc[1] * scale),
+                                           (float) (tc[2] * scale),
+                                           (float) (tc[3] * scale)};
+                            dispatchTouchSeq(w, fAction, pts, fDur);
+                            return null;
+                        });
+                    } catch (Exception e) {
+                        return AgentServer.Response.err(500,
+                                "touch failed: " + e.getMessage());
+                    }
+                    JSONObject ot = new JSONObject();
+                    ot.put("ok", true); ot.put("action", fAction);
+                    ot.put("x", tc[0]); ot.put("y", tc[1]);
+                    agentNote("touch " + fAction + " @"
+                            + (int) tc[0] + "," + (int) tc[1]);
+                    return AgentServer.Response.json(ot);
+                }
                 case "/screenshot": {
                     byte[] png = screenshot();
                     return new AgentServer.Response(200, "image/png", png);
@@ -2442,6 +2505,62 @@ public class MainActivity extends Activity {
             agentUp = false;
             Toast.makeText(this, "Agent server failed: " + e.getMessage(),
                     Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** Synthesized touch sequence on a WebView. Runs on the UI thread
+     * (called inside uiGet); points are view/device pixels.
+     * tap: DOWN -> UP; longpress: DOWN, hold, UP;
+     * swipe: DOWN -> MOVE... -> UP spread over duration_ms. */
+    private void dispatchTouchSeq(WebView w, String action, float[] pts,
+                                  long durationMs) {
+        long down = SystemClock.uptimeMillis();
+        if ("swipe".equals(action)) {
+            long dur = durationMs > 0 ? durationMs : 400;
+            int steps = Math.max(2, (int) (dur / 16));
+            dispatchTouch(w, MotionEvent.ACTION_DOWN, pts[0], pts[1],
+                    down, down);
+            for (int i = 1; i <= steps; i++) {
+                float x = pts[0] + (pts[2] - pts[0]) * i / steps;
+                float y = pts[1] + (pts[3] - pts[1]) * i / steps;
+                sleepQuiet(16);
+                dispatchTouch(w, MotionEvent.ACTION_MOVE, x, y, down,
+                        SystemClock.uptimeMillis());
+            }
+            dispatchTouch(w, MotionEvent.ACTION_UP, pts[2], pts[3], down,
+                    SystemClock.uptimeMillis());
+        } else if ("longpress".equals(action)) {
+            long hold = durationMs > 0 ? durationMs : 800;
+            dispatchTouch(w, MotionEvent.ACTION_DOWN, pts[0], pts[1],
+                    down, down);
+            sleepQuiet(hold);
+            dispatchTouch(w, MotionEvent.ACTION_UP, pts[0], pts[1], down,
+                    SystemClock.uptimeMillis());
+        } else { // tap
+            dispatchTouch(w, MotionEvent.ACTION_DOWN, pts[0], pts[1],
+                    down, down);
+            sleepQuiet(80);
+            dispatchTouch(w, MotionEvent.ACTION_UP, pts[0], pts[1], down,
+                    SystemClock.uptimeMillis());
+        }
+    }
+
+    private void dispatchTouch(WebView w, int action, float x, float y,
+                               long downTime, long eventTime) {
+        MotionEvent e = MotionEvent.obtain(downTime, eventTime, action,
+                x, y, 0);
+        try {
+            w.dispatchTouchEvent(e);
+        } finally {
+            e.recycle();
+        }
+    }
+
+    private void sleepQuiet(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
         }
     }
 

@@ -390,6 +390,19 @@ def build_parser():
                     choices=["status", "add", "clear"])
     bl.add_argument("patterns", nargs="*")
 
+    tc = SP("touch", help="synthesized touch: tap / swipe / longpress "
+            "(webview engine, agent 1.20+)")
+    tc.add_argument("action", nargs="?", default="tap",
+                    choices=["tap", "swipe", "longpress"])
+    tc.add_argument("--x", type=float, default=None)
+    tc.add_argument("--y", type=float, default=None)
+    tc.add_argument("--x2", type=float, default=None)
+    tc.add_argument("--y2", type=float, default=None)
+    tc.add_argument("--selector", default=None,
+                    help="tap the center of this element")
+    tc.add_argument("--duration-ms", type=int, default=None,
+                    help="longpress hold / swipe duration")
+
     stl = SP("stealth", help="browser impersonation / anti-detect")
     stl.add_argument("action", choices=["status", "impersonate", "apply"],
                      nargs="?", default="status")
@@ -837,6 +850,10 @@ def dispatch(b, args):
         return b.find(args.text, next=getattr(args, "next", False))
     if c == "launch":
         return b.ensure_alive()
+    if c == "touch":
+        return b.touch(action=args.action, x=args.x, y=args.y,
+                       x2=args.x2, y2=args.y2, selector=args.selector,
+                       duration_ms=args.duration_ms)
     if c == "blocklist":
         a = args.action
         if a == "add":

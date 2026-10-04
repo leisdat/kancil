@@ -3549,3 +3549,78 @@ class WebViewPowerTest(unittest.TestCase):
                          ("blocklist", "add", ["ads.com", "trk.io"]))
         a = p.parse_args(["blocklist"])
         self.assertEqual(a.action, "status")
+
+
+class WebViewTouchTest(unittest.TestCase):
+    def _eng(self):
+        from kancil.webview_engine import WebViewEngine
+        eng = WebViewEngine.__new__(WebViewEngine)
+        eng.host, eng.port = "127.0.0.1", 18091
+        eng.base = "http://127.0.0.1:18091"
+        eng.timeout = 5
+        eng.errors, eng.netlog = [], []
+        eng.cur = 0
+        eng.auto_launch = False
+        eng._page_cache, eng._page_url = None, None
+        return eng
+
+    def test_touch_tap_xy(self):
+        eng = self._eng()
+        posted = {}
+        eng._post = lambda p, b: posted.update(
+            {"p": p, "b": b}) or {"ok": True, "action": "tap",
+                                  "x": 10.0, "y": 20.0}
+        r = eng.touch("tap", x=10, y=20)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(posted["p"], "/touch")
+        self.assertEqual(posted["b"], {"action": "tap", "x": 10, "y": 20})
+
+    def test_touch_swipe(self):
+        eng = self._eng()
+        posted = {}
+        eng._post = lambda p, b: posted.update(
+            {"b": b}) or {"ok": True, "action": "swipe"}
+        r = eng.touch("swipe", x=100, y=800, x2=100, y2=200,
+                      duration_ms=500)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(posted["b"]["action"], "swipe")
+        self.assertEqual(posted["b"]["duration_ms"], 500)
+
+    def test_touch_selector(self):
+        eng = self._eng()
+        eng.evaluate = lambda js: {"success": True, "result": '"150,250"'}
+        posted = {}
+        eng._post = lambda p, b: posted.update(
+            {"b": b}) or {"ok": True, "action": "tap"}
+        r = eng.touch("tap", selector="#btn")
+        self.assertTrue(r["success"], r)
+        self.assertEqual((posted["b"]["x"], posted["b"]["y"]),
+                         (150.0, 250.0))
+
+    def test_touch_selector_missing(self):
+        eng = self._eng()
+        eng.evaluate = lambda js: {"success": True, "result": "null"}
+        r = eng.touch("tap", selector="#nope")
+        self.assertFalse(r["success"])
+        self.assertIn("not found", r["errors"][0])
+
+    def test_touch_api_and_cli(self):
+        from kancil.api import Kancil
+        from kancil import cli as cli_mod
+        k = Kancil.__new__(Kancil)
+        k.engine = self._eng()
+        k.engine.touch = lambda **kw: {"success": True, **kw}
+        k._wrap = lambda r: r
+        r = k.touch("longpress", x=5, y=5, duration_ms=900)
+        self.assertTrue(r["success"])
+        self.assertEqual(r["duration_ms"], 900)
+        k.engine = object()
+        r = k.touch("tap", x=1, y=1)
+        self.assertFalse(r["success"])
+        p = cli_mod.build_parser()
+        a = p.parse_args(["touch", "swipe", "--x", "100", "--y", "800",
+                          "--x2", "100", "--y2", "200"])
+        self.assertEqual((a.cmd, a.action, a.x2, a.y2),
+                         ("touch", "swipe", 100.0, 200.0))
+        a = p.parse_args(["touch", "--selector", "#btn"])
+        self.assertEqual((a.action, a.selector), ("tap", "#btn"))

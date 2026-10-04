@@ -23,6 +23,11 @@
 ## 3.14.0
 
 ### Added
+- **`/touch` endpoint** (APK agent 1.20): tap / swipe / longpress sintetis
+  via `MotionEvent` → `dispatchTouchEvent()` — koordinat CSS px (app konversi
+  pakai skala WebView). Python `touch(action, x, y, x2, y2, selector,
+  duration_ms)`, API `Kancil.touch()`, CLI `kancil touch`. Untuk elemen yang
+  `click()` JS tidak bisa drive (canvas, map, custom gesture).
 - **Upload base64** (APK agent 1.19): `POST /upload` terima `{filename, data}`
   base64 selain `{path}` — file dari direktori privat Termux bisa di-upload
   langsung; Python `upload()` selalu kirim base64 (fallback path-staging

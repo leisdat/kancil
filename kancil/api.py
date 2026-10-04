@@ -363,6 +363,15 @@ class Kancil:
     def console(self):
         return self._wrap(self.engine.console())
 
+    def touch(self, action="tap", x=None, y=None, x2=None, y2=None,
+              selector=None, duration_ms=None):
+        fn = getattr(self.engine, "touch", None)
+        if not fn:
+            return fail("touch needs the webview engine (agent 1.20+)",
+                        supported=False)
+        return self._wrap(fn(action=action, x=x, y=y, x2=x2, y2=y2,
+                             selector=selector, duration_ms=duration_ms))
+
     def crashes(self, clear=False):
         if self._engine_name == "webview":
             return self._wrap(self.engine.crashes(clear=clear))
