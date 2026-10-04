@@ -155,7 +155,9 @@ JavaScript, dan network log per tab — tanpa perlu agent. Tombol fullscreen vid
 > MotionEvent — buat elemen yang `click()` JS nggak bisa drive (canvas, map,
 > gesture). Selector-nya sama pintarnya kayak `click`: CSS, XPath, `@ref`
 > a11y, atau teks visible (`touch tap "Putar"`). `pinch_in`/`pinch_out`
-> buat zoom peta.
+> buat zoom peta. Flag `--human` bikin swipe ala manusia (jalur melengkung,
+> ease-in-out, jitter) — buat slider yang ada behavior analysis (nggak ada
+> garansi lolos, ini arms race).
 >
 > Polish: `press Enter` otomatis submit form beneran kalau synthetic key-nya
 > nggak ngapa-ngapain (cek: nggak ada navigasi + request baru); `har export`
