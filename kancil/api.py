@@ -365,15 +365,15 @@ class Kancil:
 
     def touch(self, action="tap", x=None, y=None, x2=None, y2=None,
               selector=None, duration_ms=None, distance_start=None,
-              distance_end=None):
+              distance_end=None, human=False):
         fn = getattr(self.engine, "touch", None)
         if not fn:
-            return fail("touch needs the webview engine (agent 1.21+)",
+            return fail("touch needs the webview engine (agent 1.22+)",
                         supported=False)
         return self._wrap(fn(action=action, x=x, y=y, x2=x2, y2=y2,
                              selector=selector, duration_ms=duration_ms,
                              distance_start=distance_start,
-                             distance_end=distance_end))
+                             distance_end=distance_end, human=human))
 
     def crashes(self, clear=False):
         if self._engine_name == "webview":

@@ -3698,3 +3698,44 @@ class WebViewTouchV2Test(unittest.TestCase):
         p = cli_mod.build_parser()
         a = p.parse_args(["touch", "pinch_out", "--x", "540", "--y", "900"])
         self.assertEqual((a.cmd, a.action), ("touch", "pinch_out"))
+
+
+class WebViewTouchHumanTest(unittest.TestCase):
+    def _eng(self):
+        from kancil.webview_engine import WebViewEngine
+        eng = WebViewEngine.__new__(WebViewEngine)
+        eng.host, eng.port = "127.0.0.1", 18093
+        eng.base = "http://127.0.0.1:18093"
+        eng.timeout = 5
+        eng.errors, eng.netlog = [], []
+        eng.cur = 0
+        eng.auto_launch = False
+        eng._healing = False
+        eng._page_cache, eng._page_url = None, None
+        return eng
+
+    def test_human_flag_passed(self):
+        eng = self._eng()
+        posted = {}
+        eng._post = lambda p, b: posted.update(
+            {"b": b}) or {"ok": True, "action": "swipe"}
+        r = eng.touch("swipe", x=10, y=100, x2=300, y2=100, human=True,
+                      duration_ms=800)
+        self.assertTrue(r["success"], r)
+        self.assertTrue(posted["b"]["human"])
+        self.assertEqual(posted["b"]["duration_ms"], 800)
+
+    def test_human_defaults_off(self):
+        eng = self._eng()
+        posted = {}
+        eng._post = lambda p, b: posted.update(
+            {"b": b}) or {"ok": True, "action": "swipe"}
+        eng.touch("swipe", x=10, y=100, x2=300, y2=100)
+        self.assertNotIn("human", posted["b"])
+
+    def test_cli_human_parses(self):
+        from kancil import cli as cli_mod
+        p = cli_mod.build_parser()
+        a = p.parse_args(["touch", "swipe", "--x", "10", "--y", "100",
+                          "--x2", "300", "--y2", "100", "--human"])
+        self.assertTrue(a.human)

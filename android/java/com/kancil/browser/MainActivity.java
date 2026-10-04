@@ -1779,7 +1779,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.21");
+                            oo.put("agent", "kancil-browser/1.22");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -2469,6 +2469,8 @@ public class MainActivity extends Activity {
                         return AgentServer.Response.err(400,
                                 "swipe needs x2/y2");
                     final long fDur = tDur;
+                    final boolean fHuman = body.optBoolean("human", false)
+                            || "1".equals(query.get("human"));
                     double ds = body.optDouble("distance_start", -1);
                     double de = body.optDouble("distance_end", -1);
                     if (fAction.equals("pinch") && (ds < 0 || de < 0))
@@ -2488,7 +2490,8 @@ public class MainActivity extends Activity {
                                         (float) (fDs * scale),
                                         (float) (fDe * scale), fDur);
                             else
-                                dispatchTouchSeq(w, fAction, pts, fDur);
+                                dispatchTouchSeq(w, fAction, pts, fDur,
+                                        fHuman);
                             return null;
                         });
                     } catch (Exception e) {
@@ -2584,6 +2587,42 @@ public class MainActivity extends Activity {
         try { w.dispatchTouchEvent(e); } finally { e.recycle(); }
     }
 
+    private void humanSwipe(WebView w, float x1, float y1,
+                              float x2, float y2, long dur, long down) {
+        java.util.Random rnd = new java.util.Random();
+        float dx = x2 - x1, dy = y2 - y1;
+        float dist = (float) Math.hypot(dx, dy);
+        if (dist < 1) dist = 1;
+        // control point: perpendicular bend 5-10% of distance, random side
+        float bend = dist * (0.05f + rnd.nextFloat() * 0.05f)
+                * (rnd.nextBoolean() ? 1f : -1f);
+        float cx = (x1 + x2) / 2 + (-dy / dist) * bend;
+        float cy = (y1 + y2) / 2 + (dx / dist) * bend;
+        int steps = Math.max(10, (int) (dur / 12));
+        dispatchTouch(w, MotionEvent.ACTION_DOWN, x1, y1, down, down);
+        // small press-and-hold before moving, like a real finger
+        sleepQuiet(60 + rnd.nextInt(90));
+        long t0 = SystemClock.uptimeMillis();
+        for (int i = 1; i <= steps; i++) {
+            float t = (float) i / steps;
+            // ease-in-out cubic: slow start, fast middle, settle at end
+            float e = t < 0.5f ? 4 * t * t * t
+                    : 1 - (float) Math.pow(-2 * t + 2, 3) / 2;
+            float u = 1 - e;
+            float x = u * u * x1 + 2 * u * e * cx + e * e * x2
+                    + (rnd.nextFloat() - 0.5f) * 3;
+            float y = u * u * y1 + 2 * u * e * cy + e * e * y2
+                    + (rnd.nextFloat() - 0.5f) * 3;
+            long target = t0 + (long) (dur * e);
+            long now = SystemClock.uptimeMillis();
+            if (target > now) sleepQuiet(target - now);
+            // rare human hesitation
+            if (rnd.nextFloat() < 0.05) sleepQuiet(20 + rnd.nextInt(50));
+            dispatchTouch(w, MotionEvent.ACTION_MOVE, x, y, down,
+                    SystemClock.uptimeMillis());
+        }
+    }
+
     private MotionEvent.PointerCoords touchCoords(float x, float y) {
         MotionEvent.PointerCoords c = new MotionEvent.PointerCoords();
         c.x = x;
@@ -2599,18 +2638,30 @@ public class MainActivity extends Activity {
      * swipe: DOWN -> MOVE... -> UP spread over duration_ms. */
     private void dispatchTouchSeq(WebView w, String action, float[] pts,
                                   long durationMs) {
+        dispatchTouchSeq(w, action, pts, durationMs, false);
+    }
+
+    /** human=true: swipe pakai trajektori ala manusia (bezier melengkung,
+     * ease-in-out, jitter, micro-pause) — buat ngadepin behavior analysis
+     * kayak slider CAPTCHA. Tidak ada garansi lolos; ini arms race. */
+    private void dispatchTouchSeq(WebView w, String action, float[] pts,
+                                  long durationMs, boolean human) {
         long down = SystemClock.uptimeMillis();
         if ("swipe".equals(action)) {
             long dur = durationMs > 0 ? durationMs : 400;
-            int steps = Math.max(2, (int) (dur / 16));
-            dispatchTouch(w, MotionEvent.ACTION_DOWN, pts[0], pts[1],
-                    down, down);
-            for (int i = 1; i <= steps; i++) {
-                float x = pts[0] + (pts[2] - pts[0]) * i / steps;
-                float y = pts[1] + (pts[3] - pts[1]) * i / steps;
-                sleepQuiet(16);
-                dispatchTouch(w, MotionEvent.ACTION_MOVE, x, y, down,
-                        SystemClock.uptimeMillis());
+            if (human) {
+                humanSwipe(w, pts[0], pts[1], pts[2], pts[3], dur, down);
+            } else {
+                int steps = Math.max(2, (int) (dur / 16));
+                dispatchTouch(w, MotionEvent.ACTION_DOWN, pts[0], pts[1],
+                        down, down);
+                for (int i = 1; i <= steps; i++) {
+                    float x = pts[0] + (pts[2] - pts[0]) * i / steps;
+                    float y = pts[1] + (pts[3] - pts[1]) * i / steps;
+                    sleepQuiet(16);
+                    dispatchTouch(w, MotionEvent.ACTION_MOVE, x, y, down,
+                            SystemClock.uptimeMillis());
+                }
             }
             dispatchTouch(w, MotionEvent.ACTION_UP, pts[2], pts[3], down,
                     SystemClock.uptimeMillis());

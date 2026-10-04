@@ -1198,8 +1198,8 @@ class WebViewEngine:
 
     def touch(self, action="tap", x=None, y=None, x2=None, y2=None,
               selector=None, duration_ms=None, distance_start=None,
-              distance_end=None):
-        """Synthesized touch (agent 1.21+): tap / swipe / longpress / pinch.
+              distance_end=None, human=False):
+        """Synthesized touch (agent 1.22+): tap / swipe / longpress / pinch.
 
         Coordinates are CSS px (like getBoundingClientRect); the app
         converts to view pixels. selector uses the engine's standard
@@ -1249,6 +1249,8 @@ class WebViewEngine:
                 body["distance_start"] = distance_start
             if distance_end is not None:
                 body["distance_end"] = distance_end
+            if human:
+                body["human"] = True
             r = self._post("/touch", body)
             if isinstance(r, dict) and r.get("ok"):
                 return {"success": True, "action": r.get("action", action),

@@ -403,6 +403,8 @@ def build_parser():
                     help="tap the center of this element")
     tc.add_argument("--duration-ms", type=int, default=None,
                     help="longpress hold / swipe duration")
+    tc.add_argument("--human", action="store_true",
+                    help="human-like swipe trajectory (bezier, ease-in-out)")
 
     stl = SP("stealth", help="browser impersonation / anti-detect")
     stl.add_argument("action", choices=["status", "impersonate", "apply"],
@@ -854,7 +856,8 @@ def dispatch(b, args):
     if c == "touch":
         return b.touch(action=args.action, x=args.x, y=args.y,
                        x2=args.x2, y2=args.y2, selector=args.selector,
-                       duration_ms=args.duration_ms)
+                       duration_ms=args.duration_ms,
+                       human=getattr(args, "human", False))
     if c == "blocklist":
         a = args.action
         if a == "add":

@@ -182,6 +182,8 @@ kancil --engine webview touch tap --selector "#play"  # synthesized tap
 kancil --engine webview touch tap "Putar"     # visible text also works
 kancil --engine webview touch swipe --x 100 --y 800 --x2 100 --y2 200
 kancil --engine webview touch pinch_out --x 540 --y 900  # map zoom
+kancil --engine webview touch swipe --x 100 --y 500 --x2 400 --y 500 --human
+# ^ human-like swipe (bezier, ease-in-out) for behavior-checked sliders
 kancil --engine webview press Enter  # synthetic Enter; auto-submit form kalau key nggak ngapa-ngapain
 kancil --engine webview press Enter --no-submit-fallback  # tanpa auto-submit
 kancil --engine webview find "kata kunci"  # find-in-page: highlight + match count
