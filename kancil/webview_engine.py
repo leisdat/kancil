@@ -419,7 +419,11 @@ class WebViewEngine:
 
     # ---------- actions ----------
 
-    def click(self, query, confirm=False):
+    def click(self, query, confirm=False, verify=None):
+        """Click like Artemis' operator: the click only counts if its
+        expected effect actually shows up. verify = selector that must
+        appear after the click (waited for, same convention as scroll).
+        """
         if self.dry_run and not confirm:
             return {"success": False, "errors": [
                 "dry-run: click blocked — pass confirm=True to actuate"]}
@@ -439,6 +443,12 @@ class WebViewEngine:
             if isinstance(st, dict):
                 out["url"] = st.get("url", "")
                 out["title"] = st.get("title", "")
+            if verify:
+                # Validator: wait for the expected effect, don't assume.
+                r = self.wait(selector=verify)
+                out["verify"] = r.get("success", False)
+                if not r.get("success"):
+                    out["errors"] = r.get("errors")
             return out
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}

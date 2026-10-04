@@ -2482,6 +2482,23 @@ class WebViewEngineTest(unittest.TestCase):
         self.assertTrue(r["success"], r)
         self.assertTrue(r["verify"])
 
+    def test_click_verify(self):
+        r = self.eng.click("#b1", verify="#b1")
+        self.assertTrue(r["success"], r)
+        self.assertTrue(r["verify"])
+
+    def test_click_verify_fail(self):
+        orig = self.eng.wait
+        self.eng.wait = lambda **k: {"success": False,
+                                     "errors": ["timeout waiting"]}
+        try:
+            r = self.eng.click("#b1", verify="#never")
+            self.assertTrue(r["success"], r)  # click itself landed
+            self.assertFalse(r["verify"])
+            self.assertIn("errors", r)
+        finally:
+            self.eng.wait = orig
+
     def test_content_signal_shell(self):
         orig = self.eng._post
         self.eng._post = lambda *a, **k: {"ok": True, "result": "120|0|0"}
