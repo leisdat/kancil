@@ -1777,7 +1777,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.18");
+                            oo.put("agent", "kancil-browser/1.19");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -2062,6 +2062,39 @@ public class MainActivity extends Activity {
                 }
                 case "/upload": {
                     String p = body.optString("path", query.get("path"));
+                    String data = body.optString("data", "");
+                    if (!data.isEmpty()) {
+                        // base64 mode: bytes come from the agent (Termux
+                        // private dirs are unreadable to the app), stage to
+                        // our own cache dir.
+                        String fn = body.optString("filename", "upload.bin")
+                                .replaceAll("[^A-Za-z0-9._-]", "_");
+                        if (fn.isEmpty()) fn = "upload.bin";
+                        byte[] raw;
+                        try {
+                            raw = android.util.Base64.decode(
+                                    data, android.util.Base64.DEFAULT);
+                        } catch (Exception e) {
+                            return AgentServer.Response.err(400, "bad base64");
+                        }
+                        if (raw.length > 6 * 1024 * 1024)
+                            return AgentServer.Response.err(400,
+                                    "file too large (max 6MB)");
+                        try {
+                            java.io.File dir =
+                                    new java.io.File(getCacheDir(), "upload");
+                            dir.mkdirs();
+                            java.io.File f = new java.io.File(dir, fn);
+                            java.io.FileOutputStream fos =
+                                    new java.io.FileOutputStream(f);
+                            fos.write(raw);
+                            fos.close();
+                            p = f.getAbsolutePath();
+                        } catch (Exception e) {
+                            return AgentServer.Response.err(500,
+                                    "stage failed: " + e.getMessage());
+                        }
+                    }
                     if (p == null || p.isEmpty())
                         return AgentServer.Response.err(400, "missing path");
                     java.io.File f = new java.io.File(p);

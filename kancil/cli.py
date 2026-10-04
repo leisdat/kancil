@@ -385,6 +385,11 @@ def build_parser():
     SP("launch", help="launch the Kancil Browser app "
             "(webview engine: `am start`, waits for agent)")
 
+    bl = SP("blocklist", help="agent request blocklist (URL substrings)")
+    bl.add_argument("action", nargs="?", default="status",
+                    choices=["status", "add", "clear"])
+    bl.add_argument("patterns", nargs="*")
+
     stl = SP("stealth", help="browser impersonation / anti-detect")
     stl.add_argument("action", choices=["status", "impersonate", "apply"],
                      nargs="?", default="status")
@@ -832,6 +837,16 @@ def dispatch(b, args):
         return b.find(args.text, next=getattr(args, "next", False))
     if c == "launch":
         return b.ensure_alive()
+    if c == "blocklist":
+        a = args.action
+        if a == "add":
+            if not args.patterns:
+                return {"success": False,
+                        "errors": ["blocklist add needs patterns"]}
+            return b.block_add(args.patterns)
+        if a == "clear":
+            return b.block_clear()
+        return b.block_list()
     if c == "stealth":
         if args.action == "impersonate":
             if not args.profile:

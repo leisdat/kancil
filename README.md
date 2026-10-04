@@ -175,6 +175,9 @@ kancil --engine webview open https://example.com --verify "#main"
 # agent self-heal: if the app is dead, kancil auto-launches it via `am start`
 kancil --engine webview launch        # manual (re)launch, waits for agent
 kancil --engine webview open <url> --no-auto-launch  # opt out
+kancil --engine webview upload ./photo.jpg   # file upload (base64, agent 1.19+)
+kancil --engine webview blocklist add ads.com tracker.io  # block requests
+kancil --engine webview console               # JS console logs
 kancil --engine webview press Enter  # synthetic Enter; auto-submit form kalau key nggak ngapa-ngapain
 kancil --engine webview press Enter --no-submit-fallback  # tanpa auto-submit
 kancil --engine webview find "kata kunci"  # find-in-page: highlight + match count

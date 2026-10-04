@@ -147,6 +147,10 @@ JavaScript, dan network log per tab — tanpa perlu agent. Tombol fullscreen vid
 > Self-heal: kalau APK mati, agent otomatis `am start` buat nyalain ulang
 > (`launch` buat manual, `--no-auto-launch` buat matiin).
 >
+> Upload file sekarang base64 (APK 1.19+): file dari direktori privat Termux
+> pun bisa di-upload, nggak perlu pindah ke shared storage dulu.
+> `blocklist add <pola>` buat blokir request dari Python/CLI.
+>
 > Polish: `press Enter` otomatis submit form beneran kalau synthetic key-nya
 > nggak ngapa-ngapain (cek: nggak ada navigasi + request baru); `har export`
 > narik netlog dari APK dulu biar nggak kosong; `open()` re-sync tab ID kalau

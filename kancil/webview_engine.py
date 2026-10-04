@@ -1197,15 +1197,36 @@ class WebViewEngine:
             return {"success": False, "errors": [str(e)[:150]]}
 
     def upload(self, path):
-        """Stage a file for the next file-chooser (input[type=file] click)."""
+        """Stage a file for the next file-chooser (input[type=file] click).
+
+        The file bytes are base64'd to the app (agent 1.19+), so ANY local
+        path works — including Termux-private dirs the app cannot read
+        itself. Older agents (<1.19) only accept the path-staging mode.
+        """
+        import base64
         try:
             if not os.path.exists(path):
                 return {"success": False,
                         "errors": ["file not found: %s" % path]}
-            r = self._post("/upload", {"path": path})
+            size = os.path.getsize(path)
+            if size > 5 * 1024 * 1024:
+                return {"success": False,
+                        "errors": ["file too large (max 5MB): %s" % path]}
+            with open(path, "rb") as fh:
+                data = base64.b64encode(fh.read()).decode("ascii")
+            r = self._post("/upload", {"filename": os.path.basename(path),
+                                       "data": data})
             if isinstance(r, dict) and r.get("ok"):
-                return {"success": True, "path": path,
+                return {"success": True, "path": r.get("path", path),
                         "hint": r.get("hint", "")}
+            # pre-1.19 agent: fall back to path staging (file must be
+            # readable by the app, e.g. shared storage)
+            if isinstance(r, dict) and "missing path" in str(
+                    r.get("error", "")):
+                r = self._post("/upload", {"path": path})
+                if isinstance(r, dict) and r.get("ok"):
+                    return {"success": True, "path": path,
+                            "hint": r.get("hint", "")}
             return {"success": False, "errors": [str(r)[:200]]}
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}

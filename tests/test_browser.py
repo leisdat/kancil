@@ -2344,8 +2344,15 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
         elif p == "/console/clear":
             self._json({"ok": True})
         elif p == "/upload":
-            self._json({"ok": True, "path": body.get("path"),
-                        "hint": "click a file input next"})
+            if body.get("data"):
+                # agent 1.19+ base64 mode: staged to app cache
+                self._json({"ok": True,
+                            "path": "/cache/upload/"
+                            + body.get("filename", "upload.bin"),
+                            "hint": "click a file input next"})
+            else:
+                self._json({"ok": True, "path": body.get("path"),
+                            "hint": "click a file input next"})
         elif p == "/download":
             self._json({"ok": True, "id": 42})
         elif p == "/form/fill":
@@ -2780,7 +2787,7 @@ class WebViewEngineTest(unittest.TestCase):
         try:
             r = self.eng.upload(p)
             self.assertTrue(r["success"], r)
-            self.assertEqual(r["path"], p)
+            self.assertTrue(r["path"].startswith("/cache/upload/"), r)
         finally:
             import os
             os.unlink(p)
@@ -3429,3 +3436,116 @@ class WebViewLaunchTest(unittest.TestCase):
         p = cli_mod.build_parser()
         a = p.parse_args(["--engine", "webview", "launch"])
         self.assertEqual(a.cmd, "launch")
+        a = p.parse_args(["--no-auto-launch", "open", "https://example.com"])
+        self.assertTrue(a.no_auto_launch)
+
+
+class WebViewPowerTest(unittest.TestCase):
+    def _eng(self):
+        from kancil.webview_engine import WebViewEngine
+        eng = WebViewEngine.__new__(WebViewEngine)
+        eng.host, eng.port = "127.0.0.1", 18090
+        eng.base = "http://127.0.0.1:18090"
+        eng.timeout = 5
+        eng.errors, eng.netlog = [], []
+        eng.cur = 0
+        eng.auto_launch = False
+        eng._page_cache, eng._page_url = None, None
+        return eng
+
+    def test_upload_base64(self):
+        import base64
+        import tempfile
+        eng = self._eng()
+        posted = {}
+        eng._post = lambda path, body: posted.update(
+            {"path": path, "body": body}) or {"ok": True,
+                                              "path": "/cache/upload/f.bin"}
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+            f.write(b"\x00\x01hello")
+            fp = f.name
+        try:
+            r = eng.upload(fp)
+        finally:
+            os.unlink(fp)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(posted["path"], "/upload")
+        body = posted["body"]
+        self.assertIn("data", body)
+        self.assertEqual(base64.b64decode(body["data"]), b"\x00\x01hello")
+        self.assertTrue(body["filename"].endswith(".bin"))
+
+    def test_upload_missing_and_too_big(self):
+        eng = self._eng()
+        r = eng.upload("/no/such/file.bin")
+        self.assertFalse(r["success"])
+        self.assertIn("not found", r["errors"][0])
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.truncate(6 * 1024 * 1024)
+            fp = f.name
+        try:
+            r = eng.upload(fp)
+        finally:
+            os.unlink(fp)
+        self.assertFalse(r["success"])
+        self.assertIn("too large", r["errors"][0])
+
+    def test_upload_fallback_old_agent(self):
+        import tempfile
+        eng = self._eng()
+        calls = []
+        def fake_post(path, body):
+            calls.append(body)
+            if "data" in body:
+                return {"ok": False, "error": "missing path"}
+            return {"ok": True, "hint": "staged"}
+        eng._post = fake_post
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"x")
+            fp = f.name
+        try:
+            r = eng.upload(fp)
+        finally:
+            os.unlink(fp)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("data", calls[0])
+        self.assertEqual(calls[1], {"path": fp})
+
+    def test_blocklist_engine(self):
+        eng = self._eng()
+        eng._get = lambda p: {"ok": True, "patterns": ["ads.com"]}
+        self.assertEqual(eng.block_list(), ["ads.com"])
+        posted = {}
+        eng._post = lambda p, b: posted.update(
+            {"p": p, "b": b}) or {"ok": True, "cache_mode": "LOAD_NO_CACHE"}
+        r = eng.block_add(["ads.com", " Tracker.IO "])
+        self.assertTrue(r["success"], r)
+        self.assertEqual(posted["b"]["patterns"], ["ads.com", "tracker.io"])
+        r = eng.block_clear()
+        self.assertTrue(r["success"], r)
+        self.assertEqual(posted["b"]["patterns"], [])
+
+    def test_blocklist_api_and_cli(self):
+        from kancil.api import Kancil
+        from kancil import cli as cli_mod
+        k = Kancil.__new__(Kancil)
+        k._engine_name = "webview"
+        eng = self._eng()
+        eng.block_list = lambda: ["a.com"]
+        eng.block_add = lambda p: {"success": True, "patterns": ["a.com", p]}
+        eng.block_clear = lambda: {"success": True}
+        k.engine = eng
+        k._wrap = lambda r: r
+        self.assertEqual(k.block_list()["patterns"], ["a.com"])
+        self.assertTrue(k.block_add("b.com")["success"])
+        self.assertTrue(k.block_clear()["success"])
+        k.engine = object()  # no block_* methods
+        self.assertFalse(k.block_add("x")["success"])
+        p = cli_mod.build_parser()
+        a = p.parse_args(["blocklist", "add", "ads.com", "trk.io"])
+        self.assertEqual((a.cmd, a.action, a.patterns),
+                         ("blocklist", "add", ["ads.com", "trk.io"]))
+        a = p.parse_args(["blocklist"])
+        self.assertEqual(a.action, "status")

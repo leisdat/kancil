@@ -23,6 +23,12 @@
 ## 3.14.0
 
 ### Added
+- **Upload base64** (APK agent 1.19): `POST /upload` terima `{filename, data}`
+  base64 selain `{path}` — file dari direktori privat Termux bisa di-upload
+  langsung; Python `upload()` selalu kirim base64 (fallback path-staging
+  untuk agent lama). Batas 5MB.
+- **CLI `blocklist`** (`status|add|clear [patterns]`): `block_add/block_list/
+  block_clear` akhirnya terekspos ke CLI (sebelumnya cuma engine+API).
 - **Modul stealth** (`kancil/stealth.py`): impersonasi fingerprint TLS untuk
   static engine via `curl_cffi` (opsional — fallback otomatis ke urllib kalau
   tidak ter-install). 6 profil: `chrome`, `chrome_android` (default),
