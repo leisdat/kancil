@@ -3602,7 +3602,7 @@ class WebViewTouchTest(unittest.TestCase):
         eng.evaluate = lambda js: {"success": True, "result": "null"}
         r = eng.touch("tap", selector="#nope")
         self.assertFalse(r["success"])
-        self.assertIn("not found", r["errors"][0])
+        self.assertIn("no element matches", r["errors"][0])
 
     def test_touch_api_and_cli(self):
         from kancil.api import Kancil
