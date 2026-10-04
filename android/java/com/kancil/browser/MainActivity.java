@@ -893,6 +893,43 @@ public class MainActivity extends Activity {
             + "return {x:x,y:y,w:b.width,h:b.height};};"
             + "})();";
 
+    // Response-body capture for the agent (safe path: observe via JS, never
+    // intercept native loading). Patches fetch/XHR to record response
+    // bodies (capped) into window.__kancilNetBodies; read via /network/bodies.
+    // Idempotent; re-injected on every page start/finish like DEEP_QUERY_JS.
+    private static final String NETBODY_JS =
+            "(function(){"
+            + "if(window.__kancilNetBodies)return;"
+            + "window.__kancilNetBodies=[];"
+            + "var CAP=65536,MAXN=60;"
+            + "function abs(u){try{return new URL(u,document.baseURI).href;}"
+            + "catch(e){return String(u||\'\').slice(0,500);}}"
+            + "function push(m,u,s,b){try{"
+            + "var e={t:Date.now(),method:m,url:abs(u),status:s,body:b||\'\'};"
+            + "if(e.body.length>CAP){e.body=e.body.slice(0,CAP);e.truncated=true;}"
+            + "window.__kancilNetBodies.push(e);"
+            + "while(window.__kancilNetBodies.length>MAXN)"
+            + "window.__kancilNetBodies.shift();}catch(_){}}"
+            + "try{var _f=window.fetch;"
+            + "if(_f)window.fetch=function(){var a=arguments,u=\'\',m=\'GET\';"
+            + "try{if(typeof a[0]==\'string\')u=a[0];else if(a[0]&&a[0].url)u=a[0].url;"
+            + "if(a[1]&&a[1].method)m=a[1].method;"
+            + "else if(a[0]&&a[0].method)m=a[0].method;}catch(_){}"
+            + "return _f.apply(this,a).then(function(r){"
+            + "try{r.clone().text().then(function(tx){push(m,u,r.status,tx);},"
+            + "function(){});}catch(_){}return r;});};}catch(_){}"
+            + "try{var _o=XMLHttpRequest.prototype.open;"
+            + "var _s=XMLHttpRequest.prototype.send;"
+            + "XMLHttpRequest.prototype.open=function(m,u){"
+            + "try{this._kU=u;this._kM=m;}catch(_){}"
+            + "return _o.apply(this,arguments);};"
+            + "XMLHttpRequest.prototype.send=function(){var x=this;"
+            + "try{x.addEventListener(\'load\',function(){var tx=\'\';"
+            + "try{tx=x.responseText||\'\';}catch(_){}"
+            + "push(x._kM||\'GET\',x._kU,x.status,tx);});}catch(_){}"
+            + "return _s.apply(this,arguments);};}catch(_){}"
+            + "})();";
+
     // Shorthands with graceful fallback if the helpers aren't injected yet.
     private static final String DQ =
             "(window.__kancilQ||function(s){return document.querySelector(s)})";
@@ -1396,6 +1433,8 @@ public class MainActivity extends Activity {
                 if (stealth()) v.evaluateJavascript(STEALTH_JS, null);
                 // Deep-query helpers for the agent (also re-injected on finish).
                 v.evaluateJavascript(DEEP_QUERY_JS, null);
+                // Response-body capture for /network/bodies (idempotent).
+                v.evaluateJavascript(NETBODY_JS, null);
                 if (tab == active) ui.post(() -> {
                     urlBar.setText(url);
                     findViewById(R.id.error_view).setVisibility(View.GONE);
@@ -1418,6 +1457,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView v, String url) {
                 // Deep-query helpers for the agent (idempotent re-inject).
                 v.evaluateJavascript(DEEP_QUERY_JS, null);
+                v.evaluateJavascript(NETBODY_JS, null);
                 if (tab == active) ui.post(() -> {
                     urlBar.setText(url);
                     if (!tab.title.isEmpty()) setTitle(tab.title);
@@ -1779,7 +1819,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.22");
+                            oo.put("agent", "kancil-browser/1.23");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -2284,6 +2324,27 @@ public class MainActivity extends Activity {
                 case "/network/clear":
                     active.netlog.clear();
                     return ok();
+                case "/network/bodies": {
+                    // Captured XHR/fetch response bodies (see NETBODY_JS).
+                    // ?clear=1 drains the buffer after reading.
+                    final boolean clearB =
+                            "1".equals(query.get("clear"));
+                    String bjs = "(function(){var b=window.__kancilNetBodies||[];"
+                            + (clearB ? "window.__kancilNetBodies=[];" : "")
+                            + "return JSON.stringify(b.slice(-60));})()";
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true);
+                    o.put("tab", active.id);
+                    try {
+                        String raw = evalJs(bjs);
+                        o.put("bodies", new JSONArray(
+                                raw == null || raw.isEmpty() ? "[]" : raw));
+                    } catch (Exception e) {
+                        o.put("bodies", new JSONArray());
+                        o.put("error", String.valueOf(e.getMessage()));
+                    }
+                    return AgentServer.Response.json(o);
+                }
                 case "/cookies": {
                     String url = uiGet(() -> activeWeb().getUrl());
                     String raw = CookieManager.getInstance().getCookie(url == null ? "" : url);

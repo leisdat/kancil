@@ -991,6 +991,68 @@ class WebViewEngine:
         self.netlog = []
         return {"success": True}
 
+    def network_bodies(self, clear=False):
+        """Captured XHR/fetch response bodies (agent 1.23+).
+
+        Bodies are observed via a JS fetch/XHR patch (safe: no native
+        interception), capped at 64KB each, last 60 kept per tab.
+        clear=True drains the buffer after reading."""
+        try:
+            r = self._get("/network/bodies" + ("?clear=1" if clear else ""))
+            if isinstance(r, dict) and r.get("ok"):
+                return {"success": True,
+                        "bodies": r.get("bodies", [])}
+            return {"success": False,
+                    "errors": ["bad response: %s" % str(r)[:200]]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def network_response(self, rid, max_bytes=65536):
+        """Response body for a netlog entry (agent 1.23+).
+
+        Same result shape as the static engine: pretty JSON when the
+        body parses, raw capped text otherwise. Only XHR/fetch bodies
+        are captured; documents/images are not."""
+        try:
+            entries = self.network()
+        except Exception:
+            entries = self.netlog or []
+        e = None
+        for x in entries:
+            if x.get("id") == rid:
+                e = x
+                break
+        if not e:
+            return {"success": False,
+                    "errors": ["no such request id %s" % rid]}
+        url = e.get("url", "")
+        r = self.network_bodies()
+        if not r.get("success"):
+            return r
+        match = None
+        for b in r.get("bodies", []):
+            bu = b.get("url", "")
+            if bu and (bu == url or url in bu or bu in url):
+                match = b
+        out = {"success": True, "id": rid, "url": url,
+               "status": e.get("status")}
+        if not match:
+            out["format"] = "unavailable"
+            out["note"] = ("no captured body for this request "
+                           "(only XHR/fetch bodies are captured; "
+                           "re-trigger the request, then retry)")
+            return out
+        body = (match.get("body") or "")[:max_bytes]
+        out["status"] = match.get("status", e.get("status"))
+        out["truncated"] = bool(match.get("truncated")) or             len(match.get("body") or "") > max_bytes
+        try:
+            out["json"] = json.loads(body)
+            out["format"] = "json"
+        except Exception:
+            out["format"] = "text"
+            out["body"] = body
+        return out
+
     def cookies_clear(self, domain=None):
         """Clear WebView cookies via the app agent (all, or one domain)."""
         try:

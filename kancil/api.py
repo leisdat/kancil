@@ -426,6 +426,13 @@ class Kancil:
             return self._wrap(fn(rid, max_bytes=max_bytes))
         return fail("response inspection not available on this engine")
 
+    def network_bodies(self, clear=False):
+        """Captured XHR/fetch response bodies (webview, agent 1.23+)."""
+        fn = getattr(self.engine, "network_bodies", None)
+        if fn:
+            return self._wrap(fn(clear=clear))
+        return fail("body capture not available on this engine")
+
     def network_curl(self, rid):
         """Replay a logged request as a copy-pasteable curl command."""
         import shlex

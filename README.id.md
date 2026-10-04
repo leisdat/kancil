@@ -159,6 +159,12 @@ JavaScript, dan network log per tab — tanpa perlu agent. Tombol fullscreen vid
 > ease-in-out, jitter) — buat slider yang ada behavior analysis (nggak ada
 > garansi lolos, ini arms race).
 >
+> `/network` sekarang capture body: semua response XHR/fetch direkam
+> (maks 64KB, 60 terakhir per tab) via patch JS — tanpa intercept native
+> loading, jadi nggak berisiko merusak page. `kancil network bodies` buat
+> lihat, `kancil network response <id>` buat body satu request (JSON
+> di-pretty otomatis).
+>
 > Polish: `press Enter` otomatis submit form beneran kalau synthetic key-nya
 > nggak ngapa-ngapain (cek: nggak ada navigasi + request baru); `har export`
 > narik netlog dari APK dulu biar nggak kosong; `open()` re-sync tab ID kalau

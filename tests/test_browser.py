@@ -3739,3 +3739,65 @@ class WebViewTouchHumanTest(unittest.TestCase):
         a = p.parse_args(["touch", "swipe", "--x", "10", "--y", "100",
                           "--x2", "300", "--y2", "100", "--human"])
         self.assertTrue(a.human)
+
+
+class WebViewNetworkBodiesTest(unittest.TestCase):
+    def _eng(self):
+        from kancil.webview_engine import WebViewEngine
+        eng = WebViewEngine.__new__(WebViewEngine)
+        eng.host, eng.port = "127.0.0.1", 18094
+        eng.base = "http://127.0.0.1:18094"
+        eng.timeout = 5
+        eng.errors, eng.netlog = [], []
+        eng.cur = 0
+        eng.auto_launch = False
+        eng._healing = False
+        eng._page_cache, eng._page_url = None, None
+        return eng
+
+    def test_network_bodies_ok(self):
+        eng = self._eng()
+        eng._get = lambda p: {"ok": True, "tab": 1, "bodies": [
+            {"t": 1, "method": "GET", "url": "https://x.test/api",
+             "status": 200, "body": '{"a":1}'}]} if p.startswith(
+            "/network/bodies") else {"ok": True, "requests": []}
+        r = eng.network_bodies()
+        self.assertTrue(r["success"], r)
+        self.assertEqual(len(r["bodies"]), 1)
+
+    def test_network_bodies_clear_flag(self):
+        eng = self._eng()
+        seen = {}
+        def fake_get(p):
+            seen["p"] = p
+            return {"ok": True, "bodies": []}
+        eng._get = fake_get
+        eng.network_bodies(clear=True)
+        self.assertIn("clear=1", seen["p"])
+
+    def test_network_response_json(self):
+        eng = self._eng()
+        eng._get = lambda p: {"ok": True, "tab": 1, "bodies": [
+            {"t": 1, "method": "POST", "url": "https://x.test/api/login",
+             "status": 200, "body": '{"token":"abc"}'}]} if p.startswith(
+            "/network/bodies") else {"ok": True, "requests": [
+            {"id": 7, "url": "https://x.test/api/login", "status": 200}]}
+        r = eng.network_response(7)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["format"], "json")
+        self.assertEqual(r["json"], {"token": "abc"})
+
+    def test_network_response_no_body(self):
+        eng = self._eng()
+        eng._get = lambda p: {"ok": True, "bodies": []} if p.startswith(
+            "/network/bodies") else {"ok": True, "requests": [
+            {"id": 3, "url": "https://x.test/img.png", "status": 200}]}
+        r = eng.network_response(3)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["format"], "unavailable")
+
+    def test_network_response_bad_id(self):
+        eng = self._eng()
+        eng._get = lambda p: {"ok": True, "requests": []}
+        r = eng.network_response(99)
+        self.assertFalse(r["success"])

@@ -670,6 +670,8 @@ def dispatch(b, args):
                 return b.network_request(int(args.target))
             except (ValueError, TypeError):
                 return {"success": False, "errors": ["usage: kancil network request <id>"]}
+        if args.action == "bodies":
+            return b.network_bodies(clear=(args.target == "clear"))
         filt = dict(type_=args.type, status=args.status, method=args.method)
         if args.action == "filter":
             return b.network(pattern=args.target, limit=args.limit, **filt)
@@ -679,7 +681,7 @@ def dispatch(b, args):
         try:
             return b.request(int(args.action))
         except (ValueError, TypeError):
-            return {"success": False, "errors": ["usage: kancil network [list|clear|filter <re>|request <id>|response <id>] [--har out.har]"]}
+            return {"success": False, "errors": ["usage: kancil network [list|clear|filter <re>|request <id>|response <id>|bodies [clear]] [--har out.har]"]}
     if c == "storage":
         if args.action == "cookies":
             return b.cookies()
