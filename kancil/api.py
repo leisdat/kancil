@@ -33,12 +33,14 @@ class Kancil:
                  cookie_file=None, profile=None, proxy=None, ua=None,
                  pw_session=None, pw_browser="chromium",
                  pw_executable_path=None, cache=True,
-                 webview_host=None, webview_port=None, dry_run=False):
+                 webview_host=None, webview_port=None, dry_run=False,
+                 impersonate=None):
         self.profile = profile or {}
         self.proxy = proxy
         self.ua = ua
         self.cache = cache
         self.dry_run = dry_run
+        self.impersonate = impersonate  # static engine TLS impersonation profile
         self.pw_session = pw_session
         self.pw_browser = pw_browser
         self.pw_executable_path = pw_executable_path
@@ -76,7 +78,8 @@ class Kancil:
                                     cookie_file=cookie_file,
                                     proxy=self.proxy,
                                     user_agent=self.ua or engines.UA_DEFAULT,
-                                    cache=self.cache)
+                                    cache=self.cache,
+                                    impersonate=self.impersonate)
 
     @property
     def capabilities(self):
@@ -951,6 +954,36 @@ class Kancil:
         from .engines import UA_LIST
         return ok(user_agents=UA_LIST)
 
+    # ---------- stealth (browser impersonation) ----------
+    def stealth_status(self):
+        from . import stealth as _st
+        eng = self.engine
+        return ok(engine=eng.name,
+                  curl_cffi=_st.HAVE_CURL_CFFI,
+                  profiles=_st.list_profiles(),
+                  impersonate=getattr(eng, "impersonate", None),
+                  impersonate_active=isinstance(
+                      getattr(eng, "opener", None), _st.ImpersonatedOpener))
+
+    def stealth_impersonate(self, profile):
+        """profile: key of stealth.BROWSER_PROFILES, or "off" to disable.
+        Static engine only; needs curl_cffi for the impersonated transport."""
+        if profile == "off":
+            profile = None
+        fn = getattr(self.engine, "set_impersonate", None)
+        if not fn:
+            return {"success": False,
+                    "errors": ["engine %s does not support impersonation "
+                               "(static engine only)" % self.engine.name]}
+        self.impersonate = profile
+        return self._wrap(fn(profile))
+
+    def stealth_apply(self):
+        """Inject the anti-detect JS snippet (webview engine). Re-apply
+        after every navigation."""
+        from . import stealth as _st
+        return self._wrap(_st.apply_stealth(self.engine))
+
     # ---------- request blocking (playwright, webview) ----------
     def block_add(self, pattern):
         fn = getattr(self.engine, "block_add", None)
@@ -1197,6 +1230,7 @@ class Kancil:
                 "profile": self.profile, "netlog": netlog,
                 "bookmarks": self.bookmarks, "bm_id": self._bm_id,
                 "proxy": self.proxy, "ua": self.ua, "block": block,
+                "impersonate": self.impersonate,
                 "a11y_refs": getattr(self.engine, "_a11y_css", {}),
                 "a11y_sig": getattr(self.engine, "_a11y_sig", None),
                 "storage": {"local": self.engine._ls, "session": self.engine._ss}

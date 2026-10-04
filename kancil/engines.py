@@ -21,6 +21,7 @@ import urllib.request
 from .dom import (build_dom, extract_title, render_text, select,
                   smart_resolve, a11y_items, Node)
 from . import httpcache
+from . import stealth as _stealth
 
 
 # ---------------- network helpers (shared by both engines) ----------------
@@ -452,13 +453,18 @@ class StaticEngine:
     }
 
     def __init__(self, cookie_file=None, user_agent=UA_DEFAULT,
-                 timeout=25, retries=2, proxy=None, cache=True):
+                 timeout=25, retries=2, proxy=None, cache=True,
+                 impersonate=None):
         self.timeout = timeout
         self.retries = retries
         self.ua = user_agent or UA_DEFAULT
         self.cache_enabled = bool(cache)
         _install_dns_cache()
         self.proxy = proxy
+        self.impersonate = impersonate  # None or a stealth.BROWSER_PROFILES key
+        if (impersonate is not None
+                and impersonate in _stealth.BROWSER_PROFILES):
+            self.ua = _stealth.BROWSER_PROFILES[impersonate]["ua"]
         self.jar = http.cookiejar.LWPCookieJar(cookie_file) if cookie_file else http.cookiejar.CookieJar()
         if cookie_file:
             try:
@@ -484,6 +490,16 @@ class StaticEngine:
         self._ss = {}
 
     def _build_opener(self):
+        if self.impersonate and _stealth.HAVE_CURL_CFFI:
+            # TLS-fingerprint impersonation; falls back to urllib when the
+            # profile is unknown or curl_cffi is missing.
+            try:
+                self.opener = _stealth.ImpersonatedOpener(
+                    self.jar, profile=self.impersonate,
+                    proxy=self.proxy, timeout=self.timeout)
+                return
+            except (ValueError, RuntimeError):
+                pass
         handlers = [urllib.request.HTTPCookieProcessor(self.jar)]
         if self.proxy:
             handlers.append(urllib.request.ProxyHandler(
@@ -493,6 +509,25 @@ class StaticEngine:
             handlers.append(_KeepAliveHTTPHandler())
             handlers.append(_KeepAliveHTTPSHandler())
         self.opener = urllib.request.build_opener(*handlers)
+
+    def set_impersonate(self, profile):
+        """profile: key of stealth.BROWSER_PROFILES, or None to disable.
+        Needs curl_cffi installed, otherwise silently keeps urllib.
+        Enabling also switches the UA to the profile's UA for a
+        consistent fingerprint (override afterwards with set_user_agent)."""
+        if profile is not None and profile not in _stealth.BROWSER_PROFILES:
+            return {"success": False,
+                    "errors": ["unknown profile %r (choose from %s)"
+                               % (profile, ", ".join(_stealth.list_profiles()))]}
+        self.impersonate = profile
+        if profile is not None:
+            self.ua = _stealth.BROWSER_PROFILES[profile]["ua"]
+        self._build_opener()
+        active = isinstance(self.opener, _stealth.ImpersonatedOpener)
+        return {"success": True, "impersonate": profile,
+                "active": active,
+                "note": None if active else
+                        "curl_cffi not installed; using urllib transport"}
 
     def set_proxy(self, url):
         """url like http://host:port or http://user:pass@host:port; None clears."""

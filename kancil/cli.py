@@ -19,6 +19,7 @@ def get_browser(args):
     cookie_file = session_mod.BASE + "/cookies.lwp"
     proxy = getattr(args, "proxy", None) or st.get("proxy")
     ua = getattr(args, "ua", None) or st.get("ua")
+    impersonate = getattr(args, "impersonate", None) or st.get("impersonate")
     pw_session = getattr(args, "session", None)
     pw_browser = (getattr(args, "pw_browser", None)
                   or os.environ.get("KANCIL_PW_BROWSER", "chromium"))
@@ -30,7 +31,8 @@ def get_browser(args):
                proxy=proxy, ua=ua, pw_session=pw_session,
                pw_browser=pw_browser, pw_executable_path=pw_executable_path,
                cache=not getattr(args, "no_cache", False),
-               dry_run=getattr(args, "dry_run", False))
+               dry_run=getattr(args, "dry_run", False),
+               impersonate=impersonate)
     b.import_state(st)
     return b, st
 
@@ -116,6 +118,10 @@ def _common_flags(ap, suppress=False):
                     help="proxy URL, e.g. http://127.0.0.1:8080 (persists in session)")
     ap.add_argument("--ua", default=argparse.SUPPRESS if suppress else None,
                     help="User-Agent override (persists in session)")
+    ap.add_argument("--impersonate", default=argparse.SUPPRESS if suppress else None,
+                    help="static engine TLS impersonation profile "
+                         "(chrome, chrome_android, firefox, safari, edge, tor; "
+                         "needs curl_cffi; persists in session)")
     ap.add_argument("--session", default=argparse.SUPPRESS if suppress else None,
                     help="named persistent session: playwright storage_state "
                          "is loaded at start and saved at exit")
@@ -339,6 +345,13 @@ def build_parser():
     ua = SP("ua", help="user-agent")
     ua.add_argument("action", choices=["show", "set", "rotate", "list"])
     ua.add_argument("value", nargs="?")
+
+    stl = SP("stealth", help="browser impersonation / anti-detect")
+    stl.add_argument("action", choices=["status", "impersonate", "apply"],
+                     nargs="?", default="status")
+    stl.add_argument("profile", nargs="?",
+                     help="impersonation profile (chrome, chrome_android, "
+                          "firefox, safari, edge, tor) or 'off'")
 
     bl = SP("block", help="request blocking (playwright/webview engines)")
     bl.add_argument("action", choices=["add", "list", "clear"])
@@ -756,6 +769,15 @@ def dispatch(b, args):
         if args.action == "list":
             return b.ua_list()
         return b.ua_show()
+    if c == "stealth":
+        if args.action == "impersonate":
+            if not args.profile:
+                return {"success": False,
+                        "errors": ["usage: kancil stealth impersonate <profile|off>"]}
+            return b.stealth_impersonate(args.profile)
+        if args.action == "apply":
+            return b.stealth_apply()
+        return b.stealth_status()
     if c == "block":
         if args.action == "add":
             if not args.pattern:

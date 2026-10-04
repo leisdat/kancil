@@ -186,10 +186,38 @@ kancil yt-play "termux tutorial" --port 8901
 ## Tests
 
 ```
-201 unit tests (stdlib unittest) + 5 live tests (public URLs, real Chromium)
-$ python3 -m unittest tests.test_browser
+230 unit tests (stdlib unittest) + live tests (public URLs, real Chromium)
+$ python3 -m unittest tests.test_browser tests.test_stealth
 $ python3 -m unittest tests.test_live      # needs network + chromium
 ```
+
+## Stealth (browser impersonation)
+
+Two opt-in layers, both dependency-light (`curl_cffi` is optional):
+
+```bash
+kancil stealth status                        # profiles, active transport
+kancil stealth impersonate chrome_android    # static engine: TLS fingerprint
+                                             # spoofing (chrome, firefox, safari,
+                                             # edge, tor, chrome_android)
+kancil stealth impersonate off               # back to urllib
+kancil --impersonate tor open https://...    # one-shot via CLI flag
+kancil stealth apply                         # webview engine: inject anti-detect
+                                             # JS (webdriver, canvas, WebGL, ...)
+```
+
+```python
+from kancil.api import Kancil
+b = Kancil(engine="static", impersonate="chrome_android")
+b.engine.set_impersonate("firefox")   # or None to disable
+
+from kancil import stealth
+stealth.apply_stealth(webview_engine)  # re-apply after each navigation
+```
+
+Injection-based spoofing covers the common fingerprinting vectors but can't
+match engine-level patching (Camoufox-style) — a sophisticated checker can
+still detect it. Kancil stays small on purpose.
 
 ## Project layout
 
