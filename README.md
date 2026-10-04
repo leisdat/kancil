@@ -26,8 +26,8 @@
 ✨ **New:** TLS fingerprint impersonation (`kancil stealth impersonate`,
 6 browser profiles) · WebView anti-detect JS injection · `kancil session clear`
 with per-domain cookie wipe · APK agent 1.18 (`/cookies/set`, `/ua/set`,
-`/find`) · `click(..., verify=...)` validator pattern · stealth status in
-`kancil doctor`.
+`/find`) · validator pattern (`click`/`type`/`open --verify`) · stealth status
+in `kancil doctor`.
 
 ```bash
 pip install -e .
@@ -168,6 +168,10 @@ kancil --engine webview press Escape --selector "#modal"
 kancil --engine webview longpress ".tweet"     # mobile long-press (context menu)
 kancil --engine webview scroll 600 --settle-ms 1200  # scroll + wait render
 kancil --engine webview scroll 600 --verify ".new-post"  # wait for content
+# validator pattern (Artemis): action only counts as done if the effect shows up
+kancil --engine webview click "#btn" --verify "#done"
+kancil --engine webview type "#q" "hello" --verify ".suggest"
+kancil --engine webview open https://example.com --verify "#main"
 kancil --engine webview press Enter  # synthetic Enter; auto-submit form kalau key nggak ngapa-ngapain
 kancil --engine webview press Enter --no-submit-fallback  # tanpa auto-submit
 kancil --engine webview find "kata kunci"  # find-in-page: highlight + match count
