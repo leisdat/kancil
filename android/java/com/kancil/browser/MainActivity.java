@@ -84,6 +84,9 @@ public class MainActivity extends Activity {
         String customUA = "";
         /** True if this tab was spawned by window.open / target=_blank. */
         boolean popup = false;
+        /** downTime of the current press-drag-release gesture (for
+         * /touch down/move/up primitives, agent 1.24+). */
+        long touchDownTime = 0;
         Tab(int id, WebView web) { this.id = id; this.web = web; }
 
         void consoleAdd(String level, String text, String source, int line) {
@@ -1819,7 +1822,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.23");
+                            oo.put("agent", "kancil-browser/1.24");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -2504,9 +2507,13 @@ public class MainActivity extends Activity {
                     final String fAction = tAction.toLowerCase();
                     if (!fAction.equals("tap") && !fAction.equals("swipe")
                             && !fAction.equals("longpress")
-                            && !fAction.equals("pinch"))
+                            && !fAction.equals("pinch")
+                            && !fAction.equals("down")
+                            && !fAction.equals("move")
+                            && !fAction.equals("up"))
                         return AgentServer.Response.err(400,
-                                "action must be tap|swipe|longpress|pinch");
+                                "action must be tap|swipe|longpress|pinch|"
+                                + "down|move|up");
                     String[] tkeys = {"x", "y", "x2", "y2"};
                     final double[] tc = new double[4];
                     for (int ti = 0; ti < 4; ti++) {
@@ -2550,7 +2557,31 @@ public class MainActivity extends Activity {
                                 dispatchPinch(w, pts[0], pts[1],
                                         (float) (fDs * scale),
                                         (float) (fDe * scale), fDur);
-                            else
+                            else if (fAction.equals("down")
+                                    || fAction.equals("move")
+                                    || fAction.equals("up")) {
+                                // Raw press-drag-release primitives (agent
+                                // 1.24+): share one downTime so the gesture
+                                // is a single touch stream. For closed-loop
+                                // drags (e.g. CAPTCHA sliders) driven from
+                                // Python step by step.
+                                Tab ttab = active;
+                                if (fAction.equals("down"))
+                                    ttab.touchDownTime =
+                                            SystemClock.uptimeMillis();
+                                long dnt = ttab.touchDownTime != 0
+                                        ? ttab.touchDownTime
+                                        : SystemClock.uptimeMillis();
+                                int ev = fAction.equals("down")
+                                        ? MotionEvent.ACTION_DOWN
+                                        : fAction.equals("move")
+                                        ? MotionEvent.ACTION_MOVE
+                                        : MotionEvent.ACTION_UP;
+                                dispatchTouch(w, ev, pts[0], pts[1], dnt,
+                                        SystemClock.uptimeMillis());
+                                if (fAction.equals("up"))
+                                    ttab.touchDownTime = 0;
+                            } else
                                 dispatchTouchSeq(w, fAction, pts, fDur,
                                         fHuman);
                             return null;

@@ -251,6 +251,11 @@ def build_parser():
     sh.add_argument("--element", default=None)
     sh.add_argument("--out", default=None)
 
+    al = SP("aliyun-solve",
+            help="solve Aliyun FeiLin slide/puzzle CAPTCHA (closed-loop)")
+    al.add_argument("--max-tries", type=int, default=4)
+    al.add_argument("--handle-sel", default=".slider-move")
+    al.add_argument("--puzzle-sel", default="img.puzzle")
     net = SP("network", help="network log")
     net.add_argument("action", nargs="?", default="list")
     net.add_argument("target", nargs="?")
@@ -655,6 +660,10 @@ def dispatch(b, args):
         return {"success": r.get("healthy", False), "_printed": True}
     if c == "screenshot":
         return b.screenshot(path=args.out, full=args.full, selector=args.element)
+    if c == "aliyun-solve":
+        return b.solve_aliyun_puzzle(max_tries=args.max_tries,
+                                     handle_sel=args.handle_sel,
+                                     puzzle_sel=args.puzzle_sel)
     if c == "network":
         if args.har:
             return b.har_export(args.har, redact=not args.no_redact)

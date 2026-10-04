@@ -165,6 +165,13 @@ JavaScript, dan network log per tab — tanpa perlu agent. Tombol fullscreen vid
 > lihat, `kancil network response <id>` buat body satu request (JSON
 > di-pretty otomatis).
 >
+> **Aliyun slider solver** (`kancil aliyun-solve`, APK 1.24): port pendekatan
+> 0xgetz/aliyun-puzzle-solver (MIT) — deteksi gap via analisis pixel (gray
+> veil), lalu drag **closed-loop**: baca `style.left` tiap step kecil dan
+> berhenti pas target. Primitif `/touch` baru: `down`/`move`/`up` (satu
+> downTime per gesture). Tanpa garansi — arms race, dan Descope lockout
+> 5x/180 dtk.
+>
 > Polish: `press Enter` otomatis submit form beneran kalau synthetic key-nya
 > nggak ngapa-ngapain (cek: nggak ada navigasi + request baru); `har export`
 > narik netlog dari APK dulu biar nggak kosong; `open()` re-sync tab ID kalau

@@ -433,6 +433,19 @@ class Kancil:
             return self._wrap(fn(clear=clear))
         return fail("body capture not available on this engine")
 
+    def solve_aliyun_puzzle(self, max_tries=4, handle_sel=".slider-move",
+                            puzzle_sel="img.puzzle", verbose=True):
+        """Solve an Aliyun FeiLin slide/puzzle CAPTCHA in the current tab.
+
+        Closed-loop human-like drag (webview, agent 1.24+). Approach
+        ported from 0xgetz/aliyun-puzzle-solver (MIT). No guarantee —
+        Aliyun's risk engine also weighs IP/behavior history."""
+        from kancil import aliyun as _al
+        return {"success": True,
+                **_al.solve_aliyun_puzzle(
+                    self, max_tries=max_tries, handle_sel=handle_sel,
+                    puzzle_sel=puzzle_sel, verbose=verbose)}
+
     def network_curl(self, rid):
         """Replay a logged request as a copy-pasteable curl command."""
         import shlex

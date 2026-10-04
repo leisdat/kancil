@@ -3801,3 +3801,90 @@ class WebViewNetworkBodiesTest(unittest.TestCase):
         eng._get = lambda p: {"ok": True, "requests": []}
         r = eng.network_response(99)
         self.assertFalse(r["success"])
+
+
+class AliyunSolverTest(unittest.TestCase):
+    class FakeEng:
+        """Mock engine: canned evaluate + touch event log."""
+        def __init__(self):
+            self.touches = []
+            self.left = 0.0
+            self.target = 120.0
+            self.mask_gone_at = None
+            self.calls = 0
+
+        def evaluate(self, js):
+            self.calls += 1
+            if "__aliyunResult" in js and "started" in js:
+                return {"success": True, "result": '"started"'}
+            if "window.__aliyunResult" in js:
+                return {"success": True, "result": json.dumps(
+                    json.dumps({"targetLeft": self.target,
+                                "puzzleW": 296, "scale": 1.0}))}
+            if "slider-move" in js and "handleX" in js:
+                return {"success": True, "result": json.dumps(
+                    json.dumps({"handle": True, "handleX": 50.0,
+                                "handleY": 300.0, "puzzle": True,
+                                "puzzleW": 296, "left": self.left}))}
+            if "style.left" in js:
+                return {"success": True, "result": '"%s"' % self.left}
+            if "aliyunCaptcha-mask" in js:
+                return {"success": True,
+                        "result": '"true"'
+                        if self.mask_gone_at is not None and
+                        self.calls >= self.mask_gone_at else '"false"'}
+            return {"success": True, "result": '"null"'}
+
+        def touch(self, action, x=None, y=None, **kw):
+            self.touches.append((action, round(x or 0, 1),
+                                 round(y or 0, 1)))
+            if action == "move":
+                # strip follows the finger 1:1 in the mock
+                self.left = (x or 0) - 50.0
+            return {"success": True, "action": action}
+
+    def test_closed_loop_reaches_target(self):
+        import json as _json  # noqa
+        from kancil import aliyun
+        eng = self.FakeEng()
+        eng.mask_gone_at = 0  # mask gone -> verified after drag
+        r = aliyun.solve_aliyun_puzzle(eng, max_tries=1, verbose=False)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["tries"], 1)
+        acts = [a for a, _, _ in eng.touches]
+        self.assertEqual(acts[0], "down")
+        self.assertEqual(acts[-1], "up")
+        self.assertIn("move", acts)
+        # closed-loop: last move lands near target (120), not overshoot
+        moves = [x for a, x, y in eng.touches if a == "move"]
+        self.assertLessEqual(moves[-1] - 50.0, 120.0 + 2)
+
+    def test_step_math(self):
+        # step = min(14, max(3, rem*0.35)): far -> 14, near -> shrinks
+        self.assertEqual(min(14, max(3, 100 * 0.35)), 14)
+        self.assertAlmostEqual(min(14, max(3, 10 * 0.35)), 3.5)
+
+    def test_implausible_target_rejected(self):
+        from kancil import aliyun
+        eng = self.FakeEng()
+        eng.target = 5000.0  # implausible -> retry, then give up
+        r = aliyun.solve_aliyun_puzzle(eng, max_tries=2, verbose=False)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["tries"], 2)
+        self.assertEqual(eng.touches, [])  # never pressed
+
+    def test_not_ready_gives_up(self):
+        from kancil import aliyun
+        eng = self.FakeEng()
+        eng.evaluate = lambda js: {"success": True,
+                                   "result": '"null"'}
+        r = aliyun.solve_aliyun_puzzle(eng, max_tries=1, verbose=False)
+        self.assertFalse(r["ok"])
+        self.assertIn("not ready", r["reason"])
+
+    def test_cli_parses(self):
+        from kancil import cli as cli_mod
+        p = cli_mod.build_parser()
+        a = p.parse_args(["aliyun-solve", "--max-tries", "2"])
+        self.assertEqual(a.max_tries, 2)
+        self.assertEqual(a.handle_sel, ".slider-move")
