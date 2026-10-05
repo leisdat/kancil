@@ -238,6 +238,29 @@ class WebViewEngine:
             return {"text_chars": 0, "media": 0, "feed_markers": 0,
                     "shell": False}
 
+    def state_delta(self):
+        """Post-action state in ONE round-trip: url/title/content signal.
+
+        Lets the agent answer "what changed?" without a second call
+        (previously: action + snapshot = 2 calls). Best-effort: {}
+        on failure, never raises."""
+        try:
+            r = self._post("/js", {"expr":
+                "(function(){var b=document.body;"
+                "var t=b?b.innerText.length:0;"
+                "var m=document.querySelectorAll('video,img').length;"
+                "var f=document.querySelectorAll('[role=feed],ytd-browse,"
+                "ytd-rich-grid-renderer,[data-pagelet]').length;"
+                "var sh=(t<500&&m===0&&f===0);"
+                "return JSON.stringify({url:location.href,"
+                "title:document.title,text_chars:t,media:m,"
+                "feed_markers:f,shell:sh})})()"})
+            import json as _json
+            d = _json.loads(r.get("result") or "{}")
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
     def back(self):
         self._get("/back")
         self._invalidate()

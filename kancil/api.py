@@ -89,7 +89,48 @@ class Kancil:
         caps["engine"] = self._engine_name
         return caps
 
+    # Hermes #1: mutating actions auto-attach a cheap state delta
+    # {url, title, text_chars, media, shell} so the agent learns "what
+    # changed?" without a second call. 0 extra RT on static (from the
+    # parsed Page), 1 /js probe on webview, best-effort {} elsewhere.
+    @staticmethod
+    def _with_delta(fn):
+        import functools
+
+        @functools.wraps(fn)
+        def w(self, *a, **kw):
+            r = fn(self, *a, **kw)
+            if isinstance(r, dict) and r.get("success") \
+                    and "delta" not in r:
+                try:
+                    d = self._state_delta()
+                except Exception:
+                    d = {}
+                if d:
+                    r["delta"] = d
+            return r
+
+        return w
+
+    def _state_delta(self):
+        try:
+            if self._engine_name == "webview":
+                fn = getattr(self.engine, "state_delta", None)
+                if fn:
+                    return fn() or {}
+            elif self._engine_name == "static":
+                page, err = self._page_or_fail()
+                if not err and page is not None:
+                    return {"url": getattr(page, "url", ""),
+                            "title": getattr(page, "title", ""),
+                            "text_chars": len(getattr(page, "text", "")
+                                              or "")}
+        except Exception:
+            pass
+        return {}
+
     # ---------- navigation ----------
+    @_with_delta
     def open(self, url, idle=False, idle_timeout=15, verify=None):
         if self._engine_name == "webview":
             r = self.engine.open(url, idle=idle, idle_timeout=idle_timeout,
@@ -98,12 +139,15 @@ class Kancil:
             r = self.engine.open(url)
         return self._wrap(r)
 
+    @_with_delta
     def back(self):
         return self._wrap(self.engine.back())
 
+    @_with_delta
     def forward(self):
         return self._wrap(self.engine.forward())
 
+    @_with_delta
     def reload(self):
         return self._wrap(self.engine.reload())
 
@@ -280,36 +324,45 @@ class Kancil:
         return ok(query=query, role=role, count=len(matches),
                   matches=matches[:20])
 
+    @_with_delta
     def click(self, selector, confirm=False, verify=None):
         if self._engine_name == "webview":
             return self._wrap(self.engine.click(selector, confirm=confirm,
                                                 verify=verify))
         return self._wrap(self.engine.click(selector))
 
+    @_with_delta
     def type(self, selector, text, verify=None):
         try:
             return self._wrap(self.engine.type(selector, text, verify=verify))
         except TypeError:
             return self._wrap(self.engine.type(selector, text))
 
+    @_with_delta
     def clear(self, selector):
         return self._wrap(self.engine.clear(selector))
 
+    @_with_delta
     def select(self, selector, value):
         return self._wrap(self.engine.select_option(selector, value))
 
+    @_with_delta
     def check(self, selector):
         return self._wrap(self.engine.check(selector))
 
+    @_with_delta
     def uncheck(self, selector):
         return self._wrap(self.engine.uncheck(selector))
 
+    @_with_delta
     def hover(self, selector):
         return self._wrap(self.engine.hover(selector))
 
+    @_with_delta
     def focus(self, selector):
         return self._wrap(self.engine.focus(selector))
 
+    @_with_delta
     def scroll(self, target="bottom", settle_ms=800, verify=None):
         if self._engine_name == "webview":
             return self._wrap(
@@ -363,6 +416,7 @@ class Kancil:
     def console(self):
         return self._wrap(self.engine.console())
 
+    @_with_delta
     def touch(self, action="tap", x=None, y=None, x2=None, y2=None,
               selector=None, duration_ms=None, distance_start=None,
               distance_end=None, human=False, confirm=False):
@@ -898,9 +952,11 @@ class Kancil:
     def forms(self):
         return ok(forms=self.engine.forms())
 
+    @_with_delta
     def form_fill(self, form_id, values=None, auto=False):
         return self._wrap(self.engine.fill_form(form_id - 1, values, auto, self.profile))
 
+    @_with_delta
     def form_submit(self, form_id, confirm=False):
         if self._engine_name == "webview":
             return self._wrap(
@@ -1426,6 +1482,10 @@ class Kancil:
     # ---------- internal ----------
     def _wrap(self, r):
         if isinstance(r, dict) and "success" in r:
+            if not r["success"] and "error" not in r:
+                errs = r.get("errors") or ["unknown error"]
+                code = r.get("code") or self._code_for(None, errs[0])
+                r["error"] = self._envelope(code, errs[0])
             return r
         return ok(**(r or {}))
 
@@ -1450,6 +1510,8 @@ class Kancil:
             return "TIMEOUT"
         if "no such session" in m:
             return "SESSION_NOT_FOUND"
+        if "dry-run" in m:
+            return "DRY_RUN_BLOCKED"
         if "needs the playwright engine" in m or "not installed" in m \
                 or "launch failed" in m:
             return "ENGINE_UNAVAILABLE"
@@ -1464,36 +1526,442 @@ class Kancil:
             return "INVALID_INPUT"
         if action in ("evaluate",) or "js_error" in m:
             return "JS_ERROR"
-        if action.startswith("scrape"):
+        if action and action.startswith("scrape"):
             return "SCRAPE_FAILED"
-        if action.startswith("download"):
+        if action and action.startswith("download"):
             return "DOWNLOAD_FAILED"
         if ("connection" in m or "dns" in m or "network" in m
                 or "name resolution" in m):
             return "NETWORK_ERROR"
         return "UNKNOWN_ERROR"
 
+    # Hermes #2: branch-able errors — every failure carries
+    # {code, message, retriable, hint}, not just free text.
+    _ERROR_RETRIABLE = {
+        "TIMEOUT": True, "NETWORK_ERROR": True, "NAVIGATION_FAILED": True,
+        "ELEMENT_NOT_FOUND": True, "DOWNLOAD_FAILED": True,
+        "UPLOAD_FAILED": True, "SCRAPE_FAILED": True,
+        "SESSION_NOT_FOUND": True, "RATE_LIMITED": True,
+        "CAPTCHA_REQUIRED": True, "TAB_NOT_FOUND": False,
+        "INVALID_INPUT": False, "INVALID_URL": False,
+        "UNKNOWN_ACTION": False, "ENGINE_UNAVAILABLE": False,
+        "DRY_RUN_BLOCKED": False, "JS_ERROR": False,
+        "INTERNAL_ERROR": False, "UNKNOWN_ERROR": False,
+    }
+    _ERROR_HINTS = {
+        "ELEMENT_NOT_FOUND": "re-run snapshot()/a11y() for fresh refs, "
+            "then retry; prefer semantic a11y_find over raw selectors",
+        "TIMEOUT": "retry once; bump wait ms if the page is slow",
+        "NETWORK_ERROR": "retry with backoff; check proxy/network",
+        "NAVIGATION_FAILED": "verify the URL; retry once on flaky networks",
+        "DRY_RUN_BLOCKED": "pass confirm=True to actuate (dry-run guard)",
+        "ENGINE_UNAVAILABLE": "install/enable the engine or switch engine",
+        "INVALID_INPUT": "check tool_schema() for required params",
+        "UNKNOWN_ACTION": "list actions via tool({'action':'capabilities'}) "
+            "or kancil agent-info",
+        "TAB_NOT_FOUND": "list tabs() and use a live id",
+        "SESSION_NOT_FOUND": "reload the saved session, then retry",
+        "RATE_LIMITED": "back off and retry after Retry-After",
+        "CAPTCHA_REQUIRED": "solve/refresh the challenge, then retry",
+        "JS_ERROR": "simplify the expression; check the page context",
+        "DOWNLOAD_FAILED": "verify the URL is downloadable; retry once",
+        "UPLOAD_FAILED": "verify the file exists and is <=5MB",
+        "SCRAPE_FAILED": "retry; try the webview engine for JS pages",
+    }
+
+    @classmethod
+    def _envelope(cls, code, message, **extra):
+        e = {"code": code, "message": message,
+             "retriable": cls._ERROR_RETRIABLE.get(code, False)}
+        hint = cls._ERROR_HINTS.get(code)
+        if hint:
+            e["hint"] = hint
+        e.update(extra)
+        return e
+
+    # Hermes #3: hand-verified return shapes per action (manifest).
+    _TOOL_RETURNS = {
+        "open": "{url, title, tab, delta?}",
+        "back": "{url, delta?}", "forward": "{url, delta?}",
+        "reload": "{url, delta?}", "history": "{history[], pos}",
+        "tabs": "{tabs[{id,url,title}]}", "new_tab": "{tab}",
+        "switch_tab": "{tab, url}", "close_tab": "{closed, tabs}",
+        "inspect": "{selector, found, html?, text?}",
+        "elements": "{elements[{ref,tag,text}]}",
+        "a11y": "{tree, refs}",
+        "a11y_find": "{ref, role, name} | not-found",
+        "dom_tree": "{nodes[]}", "dom_find": "{matches[]}",
+        "dom_xpath": "{matches[]}",
+        "click": "{clicked, delta?, verify?}",
+        "type": "{typed, filled?, delta?}", "clear": "{cleared, delta?}",
+        "select": "{selected, delta?}", "check": "{checked, delta?}",
+        "uncheck": "{unchecked, delta?}", "hover": "{hovered, delta?}",
+        "focus": "{focused, delta?}", "scroll": "{scrolled, delta?}",
+        "evaluate": "{result}", "wait": "{found, waited_ms}",
+        "network": "{requests[{id,t,method,url,status}]}",
+        "network_request": "{id, headers, ...}",
+        "network_response": "{id, status, body}",
+        "network_curl": "{curl}",
+        "batch": "{results[]}", "cookies_import": "{imported}",
+        "har_export": "{path, entries}",
+        "cookies": "{cookies[]}", "storage": "{keys[]}",
+        "storage_get": "{value}", "storage_set": "{set}",
+        "storage_delete": "{deleted}",
+        "screenshot": "{path?, bytes?, width, height}",
+        "pdf": "{path}", "scrape": "{items[]}",
+        "extract": "{data}", "download": "{id, url, delta?}",
+        "downloads": "{downloads[]}", "elements": "{elements[]}",
+        "errors": "{errors[]}", "forms": "{forms[]}",
+        "form_fill": "{filled[], missing[], delta?}",
+        "form_submit": "{submitted, delta?}",
+        "structured": "{schema, data}",
+        "snapshot": "{url,title,headings,links,buttons,inputs,a11y}",
+        "view": "{streaming}", "view_stop": "{stopped}",
+        "observe": "{events[]}", "console": "{logs[]}",
+        "perf": "{metrics}", "sitemap": "{urls[]}",
+        "page_json": "{json}", "yt_play": "{playing, delta?}",
+        "yt_search": "{results[]}", "yt_video": "{info}",
+        "session_save": "{saved}", "session_load": "{loaded}",
+        "session_list": "{sessions[]}", "session_info": "{info}",
+        "session_delete": "{deleted}",
+        "bookmark_add": "{added}", "bookmark_list": "{bookmarks[]}",
+        "http_cache": "{stats}", "warnings": "{warnings[]}",
+        "capabilities": "{capabilities{...}}",
+        "agent_cmd": "{result}", "agent_snapshot": "{snapshot}",
+        "agent_tabs": "{tabs}",
+    }
+
     _TOOL_ACTIONS = {}
+
+    # Hermes #3: self-describing tool manifest. Generated from
+    # _TOOL_ACTIONS at runtime — never hand-written docs that drift.
+    _TOOL_DESCRIPTIONS = {
+        "a11y": "accessibility tree",
+        "agent": "drive the real rendered page (injected agent.js)",
+        "aliyun_analyze": "dry-run Aliyun gap detection (no dragging)",
+        "aliyun_solve": "solve Aliyun FeiLin slide/puzzle CAPTCHA (closed-loop)",
+        "back": "go back",
+        "block": "request blocking (playwright/webview engines)",
+        "blocklist": "agent request blocklist (URL substrings)",
+        "bookmark": "bookmarks",
+        "check": "check checkbox/radio",
+        "clear": "clear element",
+        "click": "click element",
+        "click_through": "SPA warm nav in one process: open URL (settled) -> ",
+        "close_tab": "close tab",
+        "composer_open": "open m.facebook composer via warm nav (feed -> click)",
+        "console": "JS console logs",
+        "cookies": "cookies: list, set (session injection), clear",
+        "cookies_import": "import Netscape-format cookies.txt ",
+        "crashes": "last app crash report (webview engine)",
+        "crawl": "crawl site",
+        "daemon": "persistent background engine: zero per-command ",
+        "devtools": "capabilities & engine info",
+        "dlpause": "pause download",
+        "dlresume": "resume download",
+        "doctor": "health check: engines, server, env",
+        "dom": "DOM inspector",
+        "download": "download URL",
+        "downloads": "download manager",
+        "errors": "error console",
+        "extract": "reader mode",
+        "find": "find text in the current page",
+        "form": "form fill/submit",
+        "forms": "list forms",
+        "fwd": "go forward",
+        "har": "HAR recording session",
+        "hover": "hover element",
+        "http_cache": "inspect/clear the HTTP cache",
+        "js": "evaluate JavaScript (playwright engine)",
+        "launch": "launch the Kancil Browser app ",
+        "longpress": "mobile long-press on element (context menu)",
+        "network": "network log",
+        "new_tab": "new tab",
+        "observe": "observability: console/network/page errors + perf",
+        "open": "open URL",
+        "page_json": "extract JSON blobs embedded in the page HTML",
+        "pdf": "export page as PDF (playwright engine)",
+        "perf": "performance timing",
+        "press": "press a key like a human (Enter/Escape/Tab/arrows)",
+        "profile": "form-fill profile",
+        "proxy": "proxy settings",
+        "proxy_ca": "generate MITM CA for serve-proxy ",
+        "reload": "reload page",
+        "scrape": "scrape structured data",
+        "screenshot": "take screenshot (playwright engine)",
+        "scroll": "scroll page/element",
+        "search": "web search",
+        "select": "choose dropdown option",
+        "serve_proxy": "level 2: local HTTP(S) proxy — your real ",
+        "session": "sessions",
+        "shell": "interactive REPL",
+        "sitemap": "list page URLs from sitemap.xml",
+        "snapshot": "agent context snapshot",
+        "stealth": "browser impersonation / anti-detect",
+        "storage": "storage devtools",
+        "structured": "extract JSON-LD + OpenGraph/Twitter meta tags",
+        "switch": "switch tab",
+        "tabs": "list tabs",
+        "tool": "structured agent tool call (JSON in, JSON out)",
+        "touch": "synthesized touch: tap / swipe / longpress / ",
+        "type": "type into element",
+        "ua": "user-agent",
+        "uncheck": "uncheck",
+        "upload": "stage file for next file-chooser (webview engine)",
+        "videos": "list <video> elements (webview engine)",
+        "view": "local viewer: see the page in your browser, ",
+        "wait": "wait for selector/ms/text",
+        "wait_idle": "wait for page settle: readyState + network quiet",
+        "warnings": "console warnings",
+        "yt_play": "mini YouTube player: URL/ID or search query -> ",
+        "yt_search": "YouTube search via ytInitialData (no JS)",
+        "yt_video": "YouTube video metadata via og: tags",
+    }
+    _TOOL_DESCRIPTIONS_EXTRA = {
+        "a11y_find": "find element by semantic query + role",
+        "agent_cmd": "agent session command", "agent_snapshot": "agent snapshot",
+        "agent_tabs": "agent tab list", "batch": "run multiple tool actions",
+        "bookmark_add": "add bookmark", "bookmark_list": "list bookmarks",
+        "dom_find": "find via CSS selector", "dom_tree": "DOM tree",
+        "dom_xpath": "find via XPath", "elements": "actionable elements",
+        "evaluate": "run JavaScript", "focus": "focus element",
+        "form_fill": "fill form fields", "form_submit": "submit form",
+        "forward": "go forward", "har_export": "export HAR",
+        "history": "nav history", "inspect": "inspect element",
+        "network_curl": "request as curl", "network_request": "request detail",
+        "network_response": "response body", "session_delete": "delete session",
+        "session_info": "session info", "session_list": "list sessions",
+        "session_load": "load session", "session_save": "save session",
+        "storage_delete": "delete storage key", "storage_get": "get storage key",
+        "storage_set": "set storage key", "switch_tab": "switch tab",
+        "view_stop": "stop live view",
+    }
+    _TOOL_PARAM_EXAMPLES = {
+        "selector": "#submit", "url": "https://example.com",
+        "text": "hello", "query": "search box", "xpath": "//button",
+        "js": "document.title", "expression": "document.title",
+        "ms": 3000, "id": 1, "tab": 1, "limit": 50, "max_nodes": 200,
+        "path": "/sdcard/shot.png", "file": "cookies.json",
+        "key": "session", "kind": "local", "name": "q",
+        "value": "option1", "role": "button", "target": "bottom",
+        "pattern": "api", "method": "GET", "action": "click",
+        "domain": "example.com",
+    }
+    _TOOL_STR_HINTS = {"selector", "url", "text", "query", "xpath", "js",
+                       "expression", "path", "file", "key", "kind", "name",
+                       "value", "role", "target", "pattern", "type",
+                       "method", "action", "domain", "title", "question"}
+    _TOOL_INT_HINTS = {"ms", "id", "tab", "limit", "max_nodes", "fidx",
+                       "did", "index", "n", "retries", "timeout"}
+    _TOOL_BOOL_HINTS = {"confirm", "idle", "full", "clear", "verbose"}
+
+    @classmethod
+    def _action_meta(cls, action):
+        """JSON-Schema-ish manifest for one action, derived from the
+        _TOOL_ACTIONS lambda + the api method it calls. No hand docs."""
+        import inspect as _inspect
+        import re as _re
+        import ast as _ast
+        handler = cls._TOOL_ACTIONS[action]
+        meta = {"action": action, "description": "",
+                "params": {}, "returns": cls._TOOL_RETURNS.get(
+                    action, "{success:bool, ...}"),
+                "engines": ["static", "webview", "playwright"]}
+        try:
+            src = _inspect.getsource(handler)
+        except Exception:
+            return meta
+        if "s.capabilities" in src and "s.capabilities}" in src.replace(
+                " ", ""):
+            meta["description"] = "engine capability flags"
+            return meta
+        m = _re.search(r"s\.(\w+)\s*\(", src)
+        if not m:
+            return meta
+        method_name = m.group(1)
+        meta["method"] = method_name
+        fn = getattr(cls, method_name, None)
+        if fn is not None:
+            doc = (_inspect.getdoc(fn) or "").split("\n")[0]
+            # unwrap the _with_delta decorator for the real docstring
+            if not doc and hasattr(fn, "__wrapped__"):
+                doc = (_inspect.getdoc(fn.__wrapped__) or ""
+                       ).split("\n")[0]
+            if not doc:
+                doc = cls._TOOL_DESCRIPTIONS.get(action, "")
+            if not doc:
+                doc = cls._TOOL_DESCRIPTIONS_EXTRA.get(action, "")
+            meta["description"] = doc
+            try:
+                sig = _inspect.signature(
+                    fn.__wrapped__ if hasattr(fn, "__wrapped__")
+                    else fn)
+                sig_defaults = {
+                    n: prm.default for n, prm in sig.parameters.items()
+                    if prm.default is not _inspect.Parameter.empty}
+            except Exception:
+                sig_defaults = {}
+            # engine gating, source-grounded: webview-only api
+            # methods delegate via getattr(self.engine, "x", None) +
+            # fail("... needs the webview engine"). Owners are checked
+            # against the real engine classes (branching per engine,
+            # e.g. click(), means all-engines — not gated).
+            try:
+                fsrc = _inspect.getsource(
+                    fn.__wrapped__ if hasattr(fn, "__wrapped__") else fn)
+                for gm in _re.finditer(
+                        r'getattr\(self\.engine,\s*"([\w]+)"', fsrc):
+                    attr = gm.group(1)
+                    owners = [e for e, c in
+                              (("static", cls._engine_cls("static")),
+                               ("webview", cls._engine_cls("webview")),
+                               ("playwright",
+                                cls._engine_cls("playwright")))
+                              if hasattr(c, attr)]
+                    if len(owners) == 1:
+                        meta["engines"] = owners
+                        break
+            except Exception:
+                pass
+        else:
+            sig_defaults = {}
+
+        def _jtype(py, name):
+            if isinstance(py, bool):
+                return "boolean"
+            if isinstance(py, int):
+                return "integer"
+            if isinstance(py, float):
+                return "number"
+            if isinstance(py, str):
+                return "string"
+            if isinstance(py, (list, tuple)):
+                return "array"
+            if name in cls._TOOL_BOOL_HINTS:
+                return "boolean"
+            if name in cls._TOOL_INT_HINTS:
+                return "integer"
+            return "string"
+
+        seen = set()
+        # p["k"] -> required
+        for mm in _re.finditer(r'p\["([\w]+)"\]', src):
+            k = mm.group(1)
+            if k in seen:
+                continue
+            seen.add(k)
+            meta["params"][k] = {
+                "type": _jtype(sig_defaults.get(k), k),
+                "required": True,
+                "example": cls._TOOL_PARAM_EXAMPLES.get(k)}
+        # p.get("k"[, default]) -> optional
+        for mm in _re.finditer(
+                r'(?:(int|bool|float)\(\s*)?p\.get\("([\w]+)"'
+                r'(?:,\s*(.+?))?\)', src):
+            wrapper, k, dflt_src = mm.groups()
+            if k in seen:
+                continue
+            seen.add(k)
+            default = None
+            if dflt_src is not None:
+                try:
+                    default = _ast.literal_eval(dflt_src.strip())
+                except Exception:
+                    default = dflt_src.strip()
+            elif k in sig_defaults:
+                default = sig_defaults[k]
+                if default is _inspect.Parameter.empty:
+                    default = None
+            ptype = {"int": "integer", "bool": "boolean",
+                     "float": "number"}.get(wrapper or "")
+            if not ptype:
+                base = default if default is not None else \
+                    sig_defaults.get(k)
+                ptype = _jtype(base, k)
+            pentry = {
+                "type": ptype, "required": False, "default": default,
+                "example": cls._TOOL_PARAM_EXAMPLES.get(k)}
+            # nested fallback: p.get("id", p.get("tab", 0)) -> alias.
+            # (dflt_src is truncated at the first ")" by the main
+            # regex, so match the inner form tolerantly.)
+            if isinstance(dflt_src, str) and dflt_src.strip(
+                    ).startswith("p.get("):
+                am = _re.match(r'p\.get\("(\w+)"\s*,\s*([^,)]+)',
+                               dflt_src.strip())
+                if am:
+                    try:
+                        pentry["default"] = _ast.literal_eval(
+                            am.group(2).strip())
+                    except Exception:
+                        pentry["default"] = am.group(2).strip()
+                    pentry["alias"] = am.group(1)
+                    if pentry["example"] is None:
+                        pentry["example"] = cls._TOOL_PARAM_EXAMPLES.get(
+                            am.group(1))
+            meta["params"][k] = pentry
+        return meta
+
+    @classmethod
+    def _engine_cls(cls, name):
+        if name == "static":
+            from .engines import StaticEngine
+            return StaticEngine
+        if name == "webview":
+            from .webview_engine import WebViewEngine
+            return WebViewEngine
+        from .pw_engine import PlaywrightEngine
+        return PlaywrightEngine
+
+    @classmethod
+    def _manifest_cache(cls):
+        if not hasattr(cls, "_manifest_built"):
+            cls._manifest_built = {
+                a: cls._action_meta(a)
+                for a in sorted(cls._TOOL_ACTIONS)}
+        return cls._manifest_built
+
+    def tool_schema(self, action=None):
+        """Self-describing manifest for agents (Hermes #3).
+
+        tool_schema() -> all 74 actions; tool_schema("click") -> one.
+        Generated from _TOOL_ACTIONS at runtime: params (type/required/
+        default/example), return shape, engine support. Load once,
+        never guess from stale docs."""
+        from . import __version__
+        if action is not None:
+            if action not in self._TOOL_ACTIONS:
+                return {"success": False, "errors": [
+                    "unknown action %r" % (action,)],
+                    "error": self._envelope(
+                        "UNKNOWN_ACTION", "unknown action %r" % (action,),
+                        actions=sorted(self._TOOL_ACTIONS))}
+            return {"success": True, "action": action,
+                    "schema": self._manifest_cache()[action]}
+        return {"success": True, "kancil": __version__,
+                "actions": self._manifest_cache(),
+                "error_envelope": "{success:false, errors[], "
+                    "error:{code, message, retriable, hint}}",
+                "delta": "mutating actions attach "
+                    "delta{url,title,text_chars,media,shell}"}
 
     def tool(self, payload):
         """Structured agent tool call. payload: {"action": ..., ...params}."""
         if not isinstance(payload, dict):
-            return {"success": False, "error": {
-                "code": "INVALID_INPUT", "message": "payload must be a JSON object"}}
+            return {"success": False, "error": self._envelope(
+                "INVALID_INPUT", "payload must be a JSON object")}
         action = payload.get("action")
         handler = self._TOOL_ACTIONS.get(action)
         if not handler:
-            return {"success": False, "error": {
-                "code": "UNKNOWN_ACTION",
-                "message": "unknown action %r" % (action,),
-                "actions": sorted(self._TOOL_ACTIONS)}}
+            return {"success": False, "error": self._envelope(
+                "UNKNOWN_ACTION", "unknown action %r" % (action,),
+                actions=sorted(self._TOOL_ACTIONS))}
         try:
             result = handler(self, payload)
         except Exception as e:
-            return {"success": False, "error": {
-                "code": "INTERNAL_ERROR",
-                "message": "%s: %s" % (type(e).__name__, str(e)[:200]),
-                "action": action}}
+            return {"success": False, "error": self._envelope(
+                "INTERNAL_ERROR",
+                "%s: %s" % (type(e).__name__, str(e)[:200]),
+                action=action)}
         if not isinstance(result, dict):
             return {"success": False, "error": {
                 "code": "INTERNAL_ERROR", "message": "bad handler result"}}
@@ -1505,7 +1973,7 @@ class Kancil:
             return out
         errs = result.get("errors") or ["unknown error"]
         code = result.get("code") or self._code_for(action, errs[0])
-        err = {"code": code, "message": errs[0], "action": action}
+        err = self._envelope(code, errs[0], action=action)
         for k in ("selector", "url", "id", "tab", "name", "key"):
             if k in payload:
                 err[k] = payload[k]

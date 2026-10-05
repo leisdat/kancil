@@ -1558,6 +1558,109 @@ class MoatTest(unittest.TestCase):
                 os.environ["HOME"] = old_home
 
 
+class HermesAgentUXTest(unittest.TestCase):
+    """Hermes #1/#2/#3: state delta, error envelope, tool manifest."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.port = free_port()
+        cls.srv = http.server.HTTPServer(("127.0.0.1", cls.port), Handler)
+        cls.th = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.th.start()
+        cls.base = "http://127.0.0.1:%d" % cls.port
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
+    def test_delta_on_open_static(self):
+        from kancil.api import Kancil
+        b = Kancil(engine="static", timeout=10, retries=0)
+        try:
+            r = b.open(self.base + "/")
+            self.assertTrue(r["success"], r)
+            d = r.get("delta")
+            self.assertIsInstance(d, dict)
+            self.assertIn("url", d)
+            self.assertIn("title", d)
+            self.assertIn("text_chars", d)
+        finally:
+            b.close()
+
+    def test_delta_not_on_readonly(self):
+        from kancil.api import Kancil
+        b = Kancil(engine="static", timeout=10, retries=0)
+        try:
+            b.open(self.base + "/")
+            r = b.snapshot()
+            self.assertTrue(r["success"], r)
+            self.assertNotIn("delta", r)
+        finally:
+            b.close()
+
+    def test_error_envelope_via_wrap(self):
+        from kancil.api import Kancil
+        b = Kancil(engine="static", timeout=10, retries=0)
+        try:
+            r = b._wrap({"success": False,
+                         "errors": ["no element matches '#x'"]})
+            e = r["error"]
+            self.assertEqual(e["code"], "ELEMENT_NOT_FOUND")
+            self.assertTrue(e["retriable"])
+            self.assertIn("hint", e)
+            # errors[] preserved for back-compat
+            self.assertEqual(r["errors"], ["no element matches '#x'"])
+        finally:
+            b.close()
+
+    def test_error_envelope_dry_run(self):
+        from kancil.api import Kancil
+        b = Kancil(engine="static", timeout=10, retries=0)
+        try:
+            r = b._wrap({"success": False,
+                         "errors": ["dry-run: touch blocked"]})
+            self.assertEqual(r["error"]["code"], "DRY_RUN_BLOCKED")
+            self.assertFalse(r["error"]["retriable"])
+        finally:
+            b.close()
+
+    def test_tool_failure_has_envelope(self):
+        from kancil.api import Kancil
+        b = Kancil(engine="static", timeout=10, retries=0)
+        try:
+            r = b.tool({"action": "nope"})
+            self.assertFalse(r["success"])
+            self.assertEqual(r["error"]["code"], "UNKNOWN_ACTION")
+            self.assertIn("retriable", r["error"])
+            self.assertIn("hint", r["error"])
+        finally:
+            b.close()
+
+    def test_manifest_complete(self):
+        from kancil.api import Kancil
+        if hasattr(Kancil, "_manifest_built"):
+            del Kancil._manifest_built
+        k = Kancil(engine="static", timeout=10, retries=0)
+        try:
+            m = k.tool_schema()
+            self.assertTrue(m["success"])
+            self.assertEqual(len(m["actions"]), 74)
+            for a, s in m["actions"].items():
+                self.assertTrue(s["description"], a)
+                self.assertTrue(s["engines"], a)
+                self.assertIn("returns", s, a)
+                for pk, pv in s["params"].items():
+                    self.assertIn(pv["type"],
+                                  ("string", "integer", "number",
+                                   "boolean", "array", "object"), (a, pk))
+            one = k.tool_schema("click")
+            self.assertTrue(one["success"])
+            self.assertEqual(one["schema"]["action"], "click")
+            self.assertIn("selector", one["schema"]["params"])
+        finally:
+            k.close()
+
+
 class KeepAliveTest(unittest.TestCase):
     """v3.6.0: keep-alive pooling + netlog cap."""
 

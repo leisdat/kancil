@@ -453,6 +453,10 @@ def build_parser():
 
     SP("observe", help="observability: console/network/page errors + perf")
     SP("warnings", help="console warnings")
+    ai = SP("agent-info", help="self-describing tool manifest (JSON Schema "
+                               "per action, generated from _TOOL_ACTIONS)")
+    ai.add_argument("--action", default=None,
+                    help="single action schema (default: all)")
 
     yt = SP("yt-search", help="YouTube search via ytInitialData (no JS)")
     yt.add_argument("query", nargs="+")
@@ -942,6 +946,8 @@ def dispatch(b, args):
                           forms=not args.no_forms)
     if c == "observe":
         return b.observe()
+    if c == "agent-info":
+        return b.tool_schema(args.action)
     if c == "warnings":
         return b.warnings()
     if c == "yt-search":
