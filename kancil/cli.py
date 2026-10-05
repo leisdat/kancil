@@ -262,6 +262,48 @@ def build_parser():
             help="dry-run Aliyun gap detection (no dragging)")
     an.add_argument("--handle-sel", default=None)
     an.add_argument("--puzzle-sel", default=None)
+    sl = SP("see-locate",
+            help="locate a UI element visually (0-1000 coords, no selector)")
+    sl.add_argument("description")
+    sl.add_argument("--backend", default=None,
+                    help="template|api (auto if omitted)")
+    sl.add_argument("--template", default=None,
+                    help="icon image path (backend=template)")
+    sl.add_argument("--multiple", action="store_true")
+    stp = SP("see-tap",
+             help="see the screen and tap the described target")
+    stp.add_argument("description")
+    stp.add_argument("--backend", default=None)
+    stp.add_argument("--template", default=None)
+    stp.add_argument("--verify", default=None,
+                     help="CSS selector that must appear after tap")
+    stp.add_argument("--max-tries", type=int, default=3)
+    stp.add_argument("--human", action="store_true")
+    stp.add_argument("--confirm", action="store_true",
+                     help="required to actuate in --dry-run mode")
+    sy = SP("see-type",
+            help="see an input field and type into it (no selector)")
+    sy.add_argument("description")
+    sy.add_argument("text")
+    sy.add_argument("--backend", default=None)
+    sy.add_argument("--template", default=None)
+    sy.add_argument("--confirm", action="store_true",
+                    help="required to actuate in --dry-run mode")
+    sd = SP("see-drag",
+            help="drag from one visual target to another")
+    sd.add_argument("from_desc")
+    sd.add_argument("to_desc")
+    sd.add_argument("--backend", default=None)
+    sd.add_argument("--template", default=None)
+    sd.add_argument("--human", dest="human", action="store_true",
+                    help="human-like drag curve (default on)")
+    sd.add_argument("--no-human", dest="human", action="store_false")
+    sd.set_defaults(human=True)
+    sd.add_argument("--confirm", action="store_true",
+                    help="required to actuate in --dry-run mode")
+    se = SP("see-describe",
+            help="describe the current screen in words (vision API)")
+    se.add_argument("--question", default="")
     net = SP("network", help="network log")
     net.add_argument("action", nargs="?", default="list")
     net.add_argument("target", nargs="?")
@@ -684,6 +726,25 @@ def dispatch(b, args):
     if c == "aliyun-analyze":
         return b.aliyun_analyze(handle_sel=args.handle_sel,
                                 puzzle_sel=args.puzzle_sel)
+    if c == "see-locate":
+        return b.vision_locate(args.description, backend=args.backend,
+                               template=args.template,
+                               multiple=args.multiple)
+    if c == "see-tap":
+        return b.see_tap(args.description, backend=args.backend,
+                         template=args.template, verify=args.verify,
+                         max_tries=args.max_tries, human=args.human,
+                         confirm=args.confirm)
+    if c == "see-type":
+        return b.see_type(args.description, args.text,
+                          backend=args.backend, template=args.template,
+                          confirm=args.confirm)
+    if c == "see-drag":
+        return b.see_drag(args.from_desc, args.to_desc,
+                          backend=args.backend, template=args.template,
+                          human=args.human, confirm=args.confirm)
+    if c == "see-describe":
+        return b.vision_describe(question=args.question)
     if c == "network":
         if args.har:
             return b.har_export(args.har, redact=not args.no_redact)

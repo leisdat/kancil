@@ -30,7 +30,9 @@ screenshot 1x1 + recycled-bitmap fix, dry_run guard buat touch/upload/download,
 Aliyun PIL fallback anti-CORS; `/touch` tap/swipe/pinch + human-like swipe +
 down/move/up primitives, base64 upload, auto-launch via `am start`,
 `/blocklist` CLI, XHR/fetch response-body capture, Aliyun closed-loop
-slider solver) · validator pattern (`click`/`type`/`open
+slider solver) · vision "mata" buat agent text-only (`kancil see-tap
+"tombol Login"`, `see-type`, `see-drag` — backend template/API pluggable,
+tanpa selector) · validator pattern (`click`/`type`/`open
 --verify`) · stealth status in `kancil doctor`.
 
 ```bash

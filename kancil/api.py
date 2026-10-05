@@ -562,6 +562,96 @@ class Kancil:
                     self, handle_sel=handle_sel,
                     puzzle_sel=puzzle_sel, verbose=True)}
 
+    # ---------- vision ("mata" buat agent text-only) ----------
+    def _vision_engine_or_fail(self):
+        if self._engine_name not in ("webview", "playwright"):
+            return fail("vision needs the webview or playwright engine "
+                        "(screenshot + evaluate)")
+        return None
+
+    def _vision_result(self, r):
+        """Normalize vision.py plain dicts into the error-envelope format."""
+        if r.get("success"):
+            return self._wrap(r)
+        extra = {k: v for k, v in r.items()
+                 if k not in ("success", "error", "errors")}
+        code = r.get("code") or self._code_for("vision",
+                                               r.get("error", ""))
+        return self._wrap(fail(r.get("error") or "vision failed",
+                               code=code, **extra))
+
+    def vision_locate(self, description, backend=None, template=None,
+                      multiple=False):
+        """Locate a UI element by visual description; 0-1000 candidates, no selector needed."""
+        err = self._vision_engine_or_fail()
+        if err:
+            return err
+        from kancil import vision as _v
+        g = _v.grab_png(self.engine)
+        if not g["success"]:
+            return self._vision_result(g)
+        return self._vision_result(
+            _v.locate(g["png"], description, backend=backend,
+                      template=template, multiple=multiple))
+
+    def vision_describe(self, question=""):
+        """Describe the current screen in words for a blind operator (vision API)."""
+        err = self._vision_engine_or_fail()
+        if err:
+            return err
+        from kancil import vision as _v
+        g = _v.grab_png(self.engine)
+        if not g["success"]:
+            return self._vision_result(g)
+        return self._vision_result(_v.describe_screen(g["png"],
+                                                      question=question))
+
+    def vision_calibrate(self):
+        """Lock the screenshot->CSS-px mapping; run once if taps miss."""
+        err = self._vision_engine_or_fail()
+        if err:
+            return err
+        from kancil import vision as _v
+        return self._vision_result(_v.calibrate(self.engine))
+
+    @_with_delta
+    def see_tap(self, description, backend=None, template=None,
+                verify=None, max_tries=3, human=False, confirm=False):
+        """See the screen and tap the described target (verify + retry)."""
+        err = self._vision_engine_or_fail()
+        if err:
+            return err
+        from kancil import vision as _v
+        return self._vision_result(_v.see_tap(
+            self.engine, description, backend=backend, template=template,
+            verify=verify, max_tries=max_tries, dry_run=self.dry_run,
+            confirm=confirm, human=human))
+
+    @_with_delta
+    def see_type(self, description, text, backend=None, template=None,
+                 confirm=False):
+        """See an input field and type into it (no selector needed)."""
+        err = self._vision_engine_or_fail()
+        if err:
+            return err
+        from kancil import vision as _v
+        return self._vision_result(_v.see_type(
+            self.engine, description, text, backend=backend,
+            template=template, dry_run=self.dry_run, confirm=confirm))
+
+    @_with_delta
+    def see_drag(self, from_desc, to_desc, backend=None, template=None,
+                 human=True, confirm=False):
+        """Drag from one visual target to another (e.g. slider handle)."""
+        err = self._vision_engine_or_fail()
+        if err:
+            return err
+        from kancil import vision as _v
+        return self._vision_result(_v.see_drag(
+            self.engine, from_desc, to_desc, backend=backend,
+            template=template, dry_run=self.dry_run, confirm=confirm,
+            human=human))
+
     def network_curl(self, rid):
         """Replay a logged request as a copy-pasteable curl command."""
         import shlex
@@ -1684,6 +1774,12 @@ class Kancil:
         "network_bodies": "{bodies[]}", "network_clear": "{cleared}",
         "solve_aliyun_puzzle": "{ok, tries, mode}",
         "aliyun_analyze": "{ok, targetLeft?, analysis}",
+        "vision_locate": "{candidates[]}",
+        "vision_describe": "{description}",
+        "vision_calibrate": "{viewport_css, mapping}",
+        "see_tap": "{tapped, x, y, tries, delta?}",
+        "see_type": "{typed, x, y, delta?}",
+        "see_drag": "{dragged, from, to, delta?}",
         "stealth_apply": "{applied, verified?}",
         "stealth_impersonate": "{profile}",
         "stealth_status": "{profile, active}",
@@ -1826,14 +1922,20 @@ class Kancil:
         "key": "session", "kind": "local", "name": "q",
         "value": "option1", "role": "button", "target": "bottom",
         "pattern": "api", "method": "GET", "action": "click",
-        "domain": "example.com",
+        "domain": "example.com", "description": "tombol Login biru",
+        "question": "apa isi keranjang?", "from_desc": "gagang slider",
+        "to_desc": "ujung kanan trek", "template": "/sdcard/icon.png",
+        "backend": "api", "verify": "#success",
     }
     _TOOL_STR_HINTS = {"selector", "url", "text", "query", "xpath", "js",
                        "expression", "path", "file", "key", "kind", "name",
                        "value", "role", "target", "pattern", "type",
-                       "method", "action", "domain", "title", "question"}
+                       "method", "action", "domain", "title", "question",
+                       "description", "from_desc", "to_desc", "template",
+                       "backend", "verify"}
     _TOOL_INT_HINTS = {"ms", "id", "tab", "limit", "max_nodes", "fidx",
-                       "did", "index", "n", "retries", "timeout"}
+                       "did", "index", "n", "retries", "timeout",
+                       "max_tries"}
     _TOOL_BOOL_HINTS = {"confirm", "idle", "full", "clear", "verbose"}
 
     @classmethod
@@ -2288,6 +2390,28 @@ Kancil._TOOL_ACTIONS = {
         confirm=bool(p.get("confirm", False))),
     "aliyun_analyze": lambda s, p: s.aliyun_analyze(
         handle_sel=p.get("handle_sel"), puzzle_sel=p.get("puzzle_sel")),
+    "vision_locate": lambda s, p: s.vision_locate(
+        p.get("description", ""), backend=p.get("backend"),
+        template=p.get("template"),
+        multiple=bool(p.get("multiple", False))),
+    "vision_describe": lambda s, p: s.vision_describe(
+        question=p.get("question", "")),
+    "vision_calibrate": lambda s, p: s.vision_calibrate(),
+    "see_tap": lambda s, p: s.see_tap(
+        p.get("description", ""), backend=p.get("backend"),
+        template=p.get("template"), verify=p.get("verify"),
+        max_tries=int(p.get("max_tries", 3)),
+        human=bool(p.get("human", False)),
+        confirm=bool(p.get("confirm", False))),
+    "see_type": lambda s, p: s.see_type(
+        p.get("description", ""), p.get("text", ""),
+        backend=p.get("backend"), template=p.get("template"),
+        confirm=bool(p.get("confirm", False))),
+    "see_drag": lambda s, p: s.see_drag(
+        p.get("from_desc", ""), p.get("to_desc", ""),
+        backend=p.get("backend"), template=p.get("template"),
+        human=bool(p.get("human", True)),
+        confirm=bool(p.get("confirm", False))),
     "stealth_apply": lambda s, p: s.stealth_apply(),
     "stealth_impersonate": lambda s, p: s.stealth_impersonate(
         p.get("profile", "")),

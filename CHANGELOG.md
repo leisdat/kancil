@@ -42,7 +42,7 @@
 ### Added
 - **Agent UX overhaul (Hermes feedback, Python-only)**:
   - `Kancil.tool_schema()` + CLI `kancil agent-info [--action]` —
-    manifest self-describing: 74 aksi (sekarang 109) dengan params
+    manifest self-describing: 74 aksi (sekarang 115) dengan params
     (tipe/required/default/contoh), return shape, dan engine support,
     di-generate runtime dari `_TOOL_ACTIONS` (nggak pernah drift).
   - **State delta otomatis**: 16 aksi mutating (`open`/`click`/`type`/
@@ -66,6 +66,21 @@
   ke main jalanin `pytest tests/ --ignore=tests/test_live.py` +
   compile check. `test_live.py` sengaja di-exclude (butuh network
   publik + Chromium + playwright, opt-in manual).
+- **Vision: "mata" buat agent text-only** (`kancil/vision.py`,
+  Python-only, tanpa rebuild APK): screenshot → locate → tap, buat
+  Hermes/model yang nggak support vision. Backend pluggable:
+  `template` (OpenCV template matching, offline, opsional),
+  `api` (vision model via OpenAI-compatible chat API —
+  `KANCIL_VISION_ENDPOINT`/`KANCIL_VISION_KEY`/`KANCIL_VISION_MODEL`,
+  provider `openai`/`anthropic`), `callback` (fungsi sendiri).
+  Koordinat 0-1000 ternormalisasi → CSS px via viewport. API:
+  `vision_locate()` / `vision_describe()` / `vision_calibrate()` /
+  `see_tap()` (verify + retry antar kandidat) / `see_type()`
+  (ketik via `elementFromPoint`, tanpa selector) / `see_drag()`.
+  CLI: `kancil see-locate|see-tap|see-type|see-drag|see-describe`.
+  `dry_run`/`confirm` di-respect; error envelope + state delta ikut.
+  Manifest: 109 → **115 tool actions**. Batas jujur: template rapuh
+  kalau UI ganti tema; backend `api` butuh network + key.
 - **Aliyun closed-loop slider solver** (APK agent 1.24): port pendekatan
   0xgetz/aliyun-puzzle-solver (MIT) — deteksi gap via analisis pixel
   in-page (gray veil: saturasi rendah + brightness mid/high), lalu drag
