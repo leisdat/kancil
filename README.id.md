@@ -32,7 +32,7 @@ assert) · `kancil cookies-export` (format Netscape, interop curl/playwright) ·
 `back`/`fwd --verify` · retry sadar rate-limit (Retry-After, engine static) ·
 impersonasi fingerprint TLS (`kancil stealth impersonate`,
 6 profil browser) · injeksi JS anti-detect buat WebView · `kancil session clear`
-dengan wipe cookie per-domain · APK agent 1.27 (`/wait_for` polling server-side,
+dengan wipe cookie per-domain · APK agent 1.28 (`/wait_for` polling server-side,
 `/cookies/dump`+`/load` termasuk HttpOnly, fix zombie-tab: watchdog
 loading + revive onRenderProcessGone + eval per-tab, fix status HTTP NetLog,
 fix screenshot 1x1 + recycled-bitmap, guard dry_run buat touch/upload/download,
