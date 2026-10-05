@@ -213,6 +213,7 @@ class WebViewEngine:
             out["verify"] = vr.get("success", False)
             if not vr.get("success"):
                 out["errors"] = vr.get("errors")
+                out["verify_found"] = self._verify_found()
         return out
 
     def _content_signal(self):
@@ -260,6 +261,24 @@ class WebViewEngine:
             return d if isinstance(d, dict) else {}
         except Exception:
             return {}
+
+    def _verify_found(self):
+        """What IS on the page (compact), for failed verify(). One RT,
+        only called on the failure path — cheaper than a blind re-scan."""
+        try:
+            r = self._post("/js", {"expr":
+                "(function(){var els=[...document.querySelectorAll("
+                "'a,button,[role=button],input,select,textarea,[role=link]')]"
+                ".filter(e=>e.offsetParent!==null).slice(0,25);"
+                "return JSON.stringify(els.map(e=>((e.innerText||e.value||"
+                "e.getAttribute('aria-label')||e.name||e.tagName||'')"
+                ".trim().slice(0,60)).replace(/\\s+/g,' ')))"
+                ".filter(s=>s))})()"})
+            import json as _json
+            f = _json.loads(r.get("result") or "[]")
+            return f if isinstance(f, list) else []
+        except Exception:
+            return []
 
     def back(self):
         self._get("/back")
@@ -513,6 +532,7 @@ class WebViewEngine:
                 out["verify"] = r.get("success", False)
                 if not r.get("success"):
                     out["errors"] = r.get("errors")
+                    out["verify_found"] = self._verify_found()
             return out
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
@@ -550,6 +570,7 @@ class WebViewEngine:
                 out["verify"] = vr.get("success", False)
                 if not vr.get("success"):
                     out["errors"] = vr.get("errors")
+                    out["verify_found"] = self._verify_found()
             return out
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
@@ -695,6 +716,7 @@ class WebViewEngine:
                 out["verify"] = r.get("success", False)
                 if not r.get("success"):
                     out["errors"] = r.get("errors")
+                    out["verify_found"] = self._verify_found()
             elif settle_ms:
                 time.sleep(min(settle_ms, 10000) / 1000.0)
             out["delta"] = self._scroll_y() - y0

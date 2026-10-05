@@ -89,6 +89,40 @@ class Kancil:
         caps["engine"] = self._engine_name
         return caps
 
+    # Hermes #4: cascade selectors. click(sel=["#a", ".b", "text=Login"])
+    # tries each in order until one hits. Only ELEMENT_NOT_FOUND
+    # cascades — any other error (or a verify miss) is terminal, so we
+    # never double-actuate. Returns matched_selector / tried_selectors.
+    _CASCADE_METHODS = {"click", "type", "clear", "select", "check",
+                        "uncheck", "hover", "focus"}
+
+    def _cascade(self, method_name, selectors, **kw):
+        tried = []
+        last = None
+        for sel in selectors:
+            if not isinstance(sel, str) or not sel:
+                continue
+            r = getattr(self, method_name)(sel, **kw)
+            if not isinstance(r, dict):
+                r = {"success": False, "errors": ["bad result"]}
+            if r.get("success"):
+                r["matched_selector"] = sel
+                if tried:
+                    r["tried_selectors"] = tried
+                return r
+            last = r
+            tried.append(sel)
+            code = (r.get("error") or {}).get("code")
+            if code != "ELEMENT_NOT_FOUND":
+                break
+        if last is None:
+            return {"success": False,
+                    "errors": ["no selectors given"],
+                    "error": self._envelope("INVALID_INPUT",
+                                            "no selectors given")}
+        last["tried_selectors"] = tried
+        return last
+
     # Hermes #1: mutating actions auto-attach a cheap state delta
     # {url, title, text_chars, media, shell} so the agent learns "what
     # changed?" without a second call. 0 extra RT on static (from the
@@ -326,6 +360,8 @@ class Kancil:
 
     @_with_delta
     def click(self, selector, confirm=False, verify=None):
+        if isinstance(selector, (list, tuple)):
+            return self._cascade("click", selector, confirm=confirm, verify=verify)
         if self._engine_name == "webview":
             return self._wrap(self.engine.click(selector, confirm=confirm,
                                                 verify=verify))
@@ -333,6 +369,8 @@ class Kancil:
 
     @_with_delta
     def type(self, selector, text, verify=None):
+        if isinstance(selector, (list, tuple)):
+            return self._cascade("type", selector, text=text, verify=verify)
         try:
             return self._wrap(self.engine.type(selector, text, verify=verify))
         except TypeError:
@@ -340,26 +378,38 @@ class Kancil:
 
     @_with_delta
     def clear(self, selector):
+        if isinstance(selector, (list, tuple)):
+            return self._cascade("clear", selector)
         return self._wrap(self.engine.clear(selector))
 
     @_with_delta
     def select(self, selector, value):
+        if isinstance(selector, (list, tuple)):
+            return self._cascade("select", selector, value=value)
         return self._wrap(self.engine.select_option(selector, value))
 
     @_with_delta
     def check(self, selector):
+        if isinstance(selector, (list, tuple)):
+            return self._cascade("check", selector)
         return self._wrap(self.engine.check(selector))
 
     @_with_delta
     def uncheck(self, selector):
+        if isinstance(selector, (list, tuple)):
+            return self._cascade("uncheck", selector)
         return self._wrap(self.engine.uncheck(selector))
 
     @_with_delta
     def hover(self, selector):
+        if isinstance(selector, (list, tuple)):
+            return self._cascade("hover", selector)
         return self._wrap(self.engine.hover(selector))
 
     @_with_delta
     def focus(self, selector):
+        if isinstance(selector, (list, tuple)):
+            return self._cascade("focus", selector)
         return self._wrap(self.engine.focus(selector))
 
     @_with_delta
@@ -1629,6 +1679,29 @@ class Kancil:
         "capabilities": "{capabilities{...}}",
         "agent_cmd": "{result}", "agent_snapshot": "{snapshot}",
         "agent_tabs": "{tabs}",
+        "touch": "{tapped/swiped, delta?}", "upload": "{path, staged}",
+        "videos": "{videos[]}", "crashes": "{crash_count}",
+        "network_bodies": "{bodies[]}", "network_clear": "{cleared}",
+        "solve_aliyun_puzzle": "{ok, tries, mode}",
+        "aliyun_analyze": "{ok, targetLeft?, analysis}",
+        "stealth_apply": "{applied, verified?}",
+        "stealth_impersonate": "{profile}",
+        "stealth_status": "{profile, active}",
+        "block_add": "{added}", "block_clear": "{cleared}",
+        "block_list": "{patterns[]}",
+        "ua_set": "{ua}", "ua_reset": "{reset}", "ua_show": "{ua}",
+        "proxy_set": "{proxy}", "proxy_clear": "{cleared}",
+        "proxy_show": "{proxy}",
+        "cookies_set": "{set}", "session_clear": "{cleared}",
+        "find": "{found, matches}", "press": "{pressed, delta?}",
+        "longpress": "{longpressed, delta?}",
+        "wait_idle": "{idle, waited_ms}",
+        "click_through": "{navigated, clicked, verified}",
+        "har_start": "{started}", "har_stop": "{path, entries}",
+        "har_clear": "{cleared}",
+        "download_pause": "{paused}", "download_resume": "{resumed}",
+        "bookmark_open": "{opened}", "bookmark_delete": "{deleted}",
+        "a11y_list": "{elements[]}",
     }
 
     _TOOL_ACTIONS = {}
@@ -1718,6 +1791,14 @@ class Kancil:
         "yt_video": "YouTube video metadata via og: tags",
     }
     _TOOL_DESCRIPTIONS_EXTRA = {
+        "block_add": "block request pattern", "block_clear": "clear blocklist",
+        "block_list": "list blocklist", "bookmark_delete": "delete bookmark",
+        "bookmark_open": "open bookmark", "download_pause": "pause download",
+        "download_resume": "resume download", "har_clear": "clear HAR",
+        "har_start": "start HAR capture", "har_stop": "stop HAR capture",
+        "network_clear": "clear network log", "proxy_clear": "clear proxy",
+        "proxy_show": "show proxy", "stealth_status": "stealth status",
+        "ua_set": "set user agent", "ua_show": "show user agent",
         "a11y_find": "find element by semantic query + role",
         "agent_cmd": "agent session command", "agent_snapshot": "agent snapshot",
         "agent_tabs": "agent tab list", "batch": "run multiple tool actions",
@@ -1899,6 +1980,9 @@ class Kancil:
                         pentry["example"] = cls._TOOL_PARAM_EXAMPLES.get(
                             am.group(1))
             meta["params"][k] = pentry
+        if method_name in cls._CASCADE_METHODS and "selector" in meta[
+                "params"]:
+            meta["params"]["selector"]["cascade"] = True
         return meta
 
     @classmethod
@@ -2183,4 +2267,63 @@ Kancil._TOOL_ACTIONS = {
     "agent_snapshot": lambda s, p: s.agent_snapshot(p.get("tab", ""),
                                                     p.get("timeout", 30)),
     "capabilities": lambda s, p: {"success": True, "capabilities": s.capabilities},
+    "touch": lambda s, p: s.touch(action=p.get("action", "tap"),
+                        x=p.get("x"), y=p.get("y"),
+                        x2=p.get("x2"), y2=p.get("y2"),
+                        selector=p.get("selector"),
+                        duration_ms=p.get("duration_ms"),
+                        human=bool(p.get("human", False)),
+                        confirm=bool(p.get("confirm", False))),
+    "upload": lambda s, p: s.upload(p.get("path", ""),
+                          confirm=bool(p.get("confirm", False))),
+    "videos": lambda s, p: s.videos(),
+    "crashes": lambda s, p: s.crashes(clear=bool(p.get("clear", False))),
+    "network_bodies": lambda s, p: s.network_bodies(
+        clear=bool(p.get("clear", False))),
+    "network_clear": lambda s, p: s.network_clear(),
+    "solve_aliyun_puzzle": lambda s, p: s.solve_aliyun_puzzle(
+        max_tries=int(p.get("max_tries", 4)),
+        handle_sel=p.get("handle_sel"), puzzle_sel=p.get("puzzle_sel"),
+        verbose=bool(p.get("verbose", True)),
+        confirm=bool(p.get("confirm", False))),
+    "aliyun_analyze": lambda s, p: s.aliyun_analyze(
+        handle_sel=p.get("handle_sel"), puzzle_sel=p.get("puzzle_sel")),
+    "stealth_apply": lambda s, p: s.stealth_apply(),
+    "stealth_impersonate": lambda s, p: s.stealth_impersonate(
+        p.get("profile", "")),
+    "stealth_status": lambda s, p: s.stealth_status(),
+    "block_add": lambda s, p: s.block_add(p.get("pattern", "")),
+    "block_clear": lambda s, p: s.block_clear(),
+    "block_list": lambda s, p: s.block_list(),
+    "ua_set": lambda s, p: s.ua_set(p.get("ua", "")),
+    "ua_reset": lambda s, p: s.ua_reset(),
+    "ua_show": lambda s, p: s.ua_show(),
+    "proxy_set": lambda s, p: s.proxy_set(p.get("url", "")),
+    "proxy_clear": lambda s, p: s.proxy_clear(),
+    "proxy_show": lambda s, p: s.proxy_show(),
+    "cookies_set": lambda s, p: s.cookies_set(
+        p.get("name", ""), p.get("value", ""),
+        domain=p.get("domain"), path=p.get("path", "/")),
+    "session_clear": lambda s, p: s.session_clear(
+        what=p.get("what", "all"), domain=p.get("domain")),
+    "find": lambda s, p: s.find(p.get("text", ""),
+                      next=bool(p.get("next", False))),
+    "press": lambda s, p: s.press(p.get("key", "Enter"),
+                        selector=p.get("selector")),
+    "longpress": lambda s, p: s.longpress(p.get("selector", "")),
+    "wait_idle": lambda s, p: s.wait_idle(
+        timeout=int(p.get("timeout", 15))),
+    "click_through": lambda s, p: s.click_through(
+        p.get("url", ""), p.get("click_selector", ""),
+        p.get("wait_selector", ""),
+        timeout=int(p.get("timeout", 25)),
+        confirm=bool(p.get("confirm", False))),
+    "har_start": lambda s, p: s.har_start(),
+    "har_stop": lambda s, p: s.har_stop(),
+    "har_clear": lambda s, p: s.har_clear(),
+    "download_pause": lambda s, p: s.download_pause(int(p.get("id", 0))),
+    "download_resume": lambda s, p: s.download_resume(int(p.get("id", 0))),
+    "bookmark_open": lambda s, p: s.bookmark_open(p.get("id", "")),
+    "bookmark_delete": lambda s, p: s.bookmark_delete(p.get("id", "")),
+    "a11y_list": lambda s, p: s.a11y_list(),
 }

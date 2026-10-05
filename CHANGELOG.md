@@ -40,6 +40,28 @@
   `aliyun-analyze`.
 
 ### Added
+- **Agent UX overhaul (Hermes feedback, Python-only)**:
+  - `Kancil.tool_schema()` + CLI `kancil agent-info [--action]` —
+    manifest self-describing: 74 aksi (sekarang 109) dengan params
+    (tipe/required/default/contoh), return shape, dan engine support,
+    di-generate runtime dari `_TOOL_ACTIONS` (nggak pernah drift).
+  - **State delta otomatis**: 16 aksi mutating (`open`/`click`/`type`/
+    `touch`/`back`/...) melampirkan `delta{url,title,text_chars,
+    media,shell}` — 0 RT tambahan di static, 1 probe `/js` di webview.
+  - **Error envelope**: semua path error bawa
+    `error{code,message,retriable,hint}`; `errors[]` tetap ada.
+    Kode baru: `DRY_RUN_BLOCKED`.
+  - **Cascade selectors** (Hermes #4): `click`/`type`/`clear`/`select`/
+    `check`/`uncheck`/`hover`/`focus` terima string atau list — list
+    dicoba berurutan; cuma `ELEMENT_NOT_FOUND` yang lanjut.
+    `matched_selector`/`tried_selectors` di hasil.
+  - **Verify `found[]`** (Hermes #5): verify gagal melampirkan
+    `verify_found` — elemen interaktif yang ADA di halaman.
+  - **tool() parity** (Hermes #6): 35 engine op masuk `_TOOL_ACTIONS`
+    (74 → 109): `touch`, `upload`, `network_bodies`, `stealth_*`,
+    `block_*`, `ua_*`, `proxy_*`, `cookies_set`, `session_clear`,
+    `find`/`press`/`longpress`, `wait_idle`, `click_through`, `har_*`,
+    `download_pause/resume`, `bookmark_*`, `a11y_list`, aliyun.
 - **GitHub Actions CI** (`.github/workflows/test.yml`): tiap push/PR
   ke main jalanin `pytest tests/ --ignore=tests/test_live.py` +
   compile check. `test_live.py` sengaja di-exclude (butuh network

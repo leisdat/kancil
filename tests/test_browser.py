@@ -1636,6 +1636,69 @@ class HermesAgentUXTest(unittest.TestCase):
         finally:
             b.close()
 
+    def test_cascade_selectors(self):
+        from kancil.api import Kancil
+
+        class FakeEng:
+            def click(self, selector):
+                if selector == "#a":
+                    return {"success": False,
+                            "errors": ["no element matches '#a'"]}
+                return {"success": True, "clicked": True}
+
+        k = Kancil.__new__(Kancil)
+        k._engine_name = "static"
+        k.engine = FakeEng()
+        try:
+            r = k._cascade("click", ["#a", ".b"],
+                           confirm=False, verify=None)
+            self.assertTrue(r["success"])
+            self.assertEqual(r["matched_selector"], ".b")
+            self.assertEqual(r["tried_selectors"], ["#a"])
+            # terminal (non-not-found) error stops the cascade
+            class FakeEng2:
+                def click(self, selector):
+                    return {"success": False, "errors": ["boom"]}
+            k.engine = FakeEng2()
+            r = k._cascade("click", ["#a", ".b"],
+                           confirm=False, verify=None)
+            self.assertFalse(r["success"])
+            self.assertEqual(r["tried_selectors"], ["#a"])
+            # empty list
+            r = k._cascade("click", [], confirm=False, verify=None)
+            self.assertFalse(r["success"])
+            self.assertEqual(r["error"]["code"], "INVALID_INPUT")
+        finally:
+            pass
+
+    def test_cascade_in_manifest(self):
+        from kancil.api import Kancil
+        if hasattr(Kancil, "_manifest_built"):
+            del Kancil._manifest_built
+        s = Kancil().tool_schema("click")["schema"]
+        self.assertTrue(s["params"]["selector"].get("cascade"))
+        s2 = Kancil().tool_schema("open")["schema"]
+        self.assertFalse(
+            s2["params"].get("selector", {}).get("cascade", False))
+
+    def test_new_tool_actions_present(self):
+        from kancil.api import Kancil
+        for a in ["touch", "upload", "network_bodies", "stealth_status",
+                  "block_list", "ua_show", "proxy_show", "find", "press",
+                  "wait_idle", "har_start", "a11y_list",
+                  "solve_aliyun_puzzle"]:
+            self.assertIn(a, Kancil._TOOL_ACTIONS, a)
+        # unknown action still envelope-shaped
+        r = Kancil(engine="static", timeout=5).__class__  # noqa
+        b = Kancil(engine="static", timeout=5, retries=0)
+        try:
+            r = b.tool({"action": "touch", "selector": "#x"})
+            # static engine has no touch -> structured failure, not crash
+            self.assertFalse(r["success"])
+            self.assertIn("code", r["error"])
+        finally:
+            b.close()
+
     def test_manifest_complete(self):
         from kancil.api import Kancil
         if hasattr(Kancil, "_manifest_built"):
@@ -1644,7 +1707,7 @@ class HermesAgentUXTest(unittest.TestCase):
         try:
             m = k.tool_schema()
             self.assertTrue(m["success"])
-            self.assertEqual(len(m["actions"]), 74)
+            self.assertEqual(len(m["actions"]), 109)
             for a, s in m["actions"].items():
                 self.assertTrue(s["description"], a)
                 self.assertTrue(s["engines"], a)
