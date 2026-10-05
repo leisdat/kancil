@@ -3,6 +3,32 @@
 ## Unreleased
 
 ### Fixed
+- **Zombie tab** (APK agent 1.26, temuan live): satu tab WebView yang
+  masuk loading permanen / renderer mati bikin seluruh evaluate JS
+  balik null — termasuk tab yang sehat. Recovery sebelumnya manual
+  (tutup tab, buka baru). Perbaikan:
+  - `onRenderProcessGone` sekarang di-handle (sebelumnya tidak ada):
+    WebView yang renderer-nya mati langsung di-revive — diganti
+    WebView baru di tab yang sama (id, netlog, UA, URL terakhir
+    dipertahankan), bukan dibiarkan jadi zombie.
+  - **Zombie watchdog**: tiap tab dicatat `loadingSinceMs` di
+    `onPageStarted` (dibersihkan di `onPageFinished` /
+    `onReceivedError` main frame); watchdog tiap 15 detik memanggil
+    `stopLoading()` pada tab yang loading > 60 detik.
+  - **Eval per-tab**: `/js`, `/dom`, `/text`, `/reader` terima param
+    `tab=` (body/query) — evaluasi langsung ke WebView tab itu tanpa
+    activate dulu (tanpa race); tab tersangka bisa di-probe tanpa
+    dijadikan aktif.
+  - **evalJs hardening**: referensi WebView di-capture saat dipanggil
+    (bukan saat runnable UI jalan) — menutup race activate-then-eval;
+    WebView yang hancur gagal cepat dengan pesan jelas, bukan hang 30s.
+  - **`/dom` jujur**: kalau tidak ada document, balas error 500
+    ("no document (tab #N: still loading or renderer gone)") bukan
+    null diam-diam. Python null-safe (`r.get("html") or ""`), jadi
+    fallback-nya tetap jalan.
+  - `/tabs` sekarang expose `loading`, `loading_ms`, `render_dead`,
+    `unstuck` per tab — agent bisa melihat zombie dan menutupnya
+    sendiri.
 - **NetLog HTTP status** (APK agent 1.25): `NetLog.finish()` tidak pernah
   dipanggil — status di `network()` webview selalu null. Mitigasi:
   `latestFor(url)` + stamp 200 di `onPageFinished`, status asli di

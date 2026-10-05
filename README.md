@@ -25,7 +25,8 @@
 
 ✨ **New:** TLS fingerprint impersonation (`kancil stealth impersonate`,
 6 browser profiles) · WebView anti-detect JS injection · `kancil session clear`
-with per-domain cookie wipe · APK agent 1.25 (NetLog HTTP status fix,
+with per-domain cookie wipe · APK agent 1.26 (zombie-tab fix: watchdog
+loading + onRenderProcessGone revive + eval per-tab, NetLog HTTP status fix,
 screenshot 1x1 + recycled-bitmap fix, dry_run guard buat touch/upload/download,
 Aliyun PIL fallback anti-CORS; `/touch` tap/swipe/pinch + human-like swipe +
 down/move/up primitives, base64 upload, auto-launch via `am start`,

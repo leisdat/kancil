@@ -25,7 +25,8 @@
 
 ✨ **Baru:** impersonasi fingerprint TLS (`kancil stealth impersonate`,
 6 profil browser) · injeksi JS anti-detect buat WebView · `kancil session clear`
-dengan wipe cookie per-domain · APK agent 1.25 (fix status HTTP NetLog,
+dengan wipe cookie per-domain · APK agent 1.26 (fix zombie-tab: watchdog
+loading + revive onRenderProcessGone + eval per-tab, fix status HTTP NetLog,
 fix screenshot 1x1 + recycled-bitmap, guard dry_run buat touch/upload/download,
 fallback PIL Aliyun anti-CORS; `/touch` tap/swipe/pinch + human-like swipe
 + primitif down/move/up, upload base64, auto-launch via `am start`, CLI `blocklist`,

@@ -72,7 +72,7 @@ public class MainActivity extends Activity {
     /** One browser tab: its own WebView + network log. */
     private static class Tab {
         int id; // not final: restoreTabs reassigns the persisted ID
-        final WebView web;
+        WebView web; // not final: reviveTabUi swaps a dead renderer (1.26+)
         final NetLog netlog = new NetLog();
         // JS console buffer, filled by WebChromeClient.onConsoleMessage
         // (UI thread). Synchronized: read from agent worker threads.
@@ -87,6 +87,14 @@ public class MainActivity extends Activity {
         /** downTime of the current press-drag-release gesture (for
          * /touch down/move/up primitives, agent 1.24+). */
         long touchDownTime = 0;
+        /** uptimeMillis when the current load started; 0 = not loading.
+         * Zombie watchdog (agent 1.26+): loading past ZOMBIE_MS gets
+         * stopLoading() so one stuck tab can't wedge the agent. */
+        long loadingSinceMs = 0;
+        /** Set by onRenderProcessGone until reviveTabUi swaps the WebView. */
+        boolean renderDead = false;
+        /** How many times the watchdog unstuck this tab. */
+        int unstuckCount = 0;
         Tab(int id, WebView web) { this.id = id; this.web = web; }
 
         void consoleAdd(String level, String text, String source, int line) {
@@ -109,6 +117,26 @@ public class MainActivity extends Activity {
     private ProgressBar progressBar;
     private TextView agentStatus;
     private TextView agentToast;    private final Handler ui = new Handler(Looper.getMainLooper());
+    /** Agent 1.26+: a tab loading longer than this is a zombie — the
+     * watchdog stopLoading()s it so one stuck tab can't wedge the agent. */
+    private static final long ZOMBIE_MS = 60000;
+    private final Runnable zombieWatch = new Runnable() {
+        @Override public void run() {
+            try {
+                long now = android.os.SystemClock.uptimeMillis();
+                for (Tab t : new java.util.ArrayList<>(tabs)) {
+                    if (t.renderDead || t.loadingSinceMs <= 0) continue;
+                    if (now - t.loadingSinceMs > ZOMBIE_MS) {
+                        try { t.web.stopLoading(); } catch (Exception ignored) {}
+                        t.loadingSinceMs = 0;
+                        t.unstuckCount++;
+                        agentLog("zombie tab #" + t.id + " unstuck", 2);
+                    }
+                }
+            } catch (Exception ignored) {}
+            ui.postDelayed(this, 15000);
+        }
+    };
     /** Fullscreen video (YouTube dsb): view yang lagi fullscreen + callback-nya. */
     private View customView;
     private WebChromeClient.CustomViewCallback customViewCallback;
@@ -241,6 +269,8 @@ public class MainActivity extends Activity {
 
         startAgentServer();
         setAgentStatus(serverUp());
+        // Zombie watchdog (agent 1.26+): unstick tabs stuck loading.
+        ui.postDelayed(zombieWatch, 15000);
         if (!restoreTabs()) {
             newTab(homeUrl(), false);
         }
@@ -501,6 +531,39 @@ public class MainActivity extends Activity {
         return null;
     }
 
+    /** Agent 1.26+: swap a renderer-dead WebView for a fresh one in place.
+     * Must run on the UI thread. The tab keeps its id, netlog, UA override
+     * and active/background state; the last URL is reloaded. */
+    private void reviveTabUi(int id) {
+        Tab t = findTab(id);
+        if (t == null) return;
+        String lastUrl = null;
+        try { lastUrl = t.web.getUrl(); } catch (Exception ignored) {}
+        try {
+            webContainer.removeView(t.web);
+            t.web.destroy();
+        } catch (Exception ignored) {}
+        WebView w = new WebView(MainActivity.this);
+        setupWebView(w);
+        t.web = w;
+        t.defaultUA = w.getSettings().getUserAgentString();
+        applyToggles(t);
+        w.setWebViewClient(makeClient(t));
+        w.setWebChromeClient(makeChrome(t));
+        webContainer.addView(w, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        if (t != active) w.setVisibility(View.GONE);
+        else { w.setVisibility(View.VISIBLE); w.bringToFront(); }
+        t.renderDead = false;
+        t.loadingSinceMs = 0;
+        t.touchDownTime = 0;
+        if (lastUrl != null && !lastUrl.isEmpty()) w.loadUrl(lastUrl);
+        updateTabCount();
+        saveTabs();
+        agentNote("tab #" + id + " revived");
+    }
+
     private String engineKey() {
         return prefs.getString("search_engine", "google");
     }
@@ -752,7 +815,10 @@ public class MainActivity extends Activity {
             + "return 'on';})()";
 
     private void toggleReader() {
-        ui.post(() -> activeWeb().evaluateJavascript(READER_JS, v ->
+        // Capture at call time (1.26+): don't let a tab switch redirect it.
+        final WebView w = activeWeb();
+        if (w == null) return;
+        ui.post(() -> w.evaluateJavascript(READER_JS, v ->
                 agentNote("reader " + v)));
     }
 
@@ -1422,6 +1488,9 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageStarted(WebView v, String url, Bitmap favicon) {
+                // Zombie watchdog (agent 1.26+): stamp every navigation start.
+                tab.loadingSinceMs = android.os.SystemClock.uptimeMillis();
+                tab.renderDead = false;
                 // Tab popup yang navigasi ke URL iklan: tutup langsung,
                 // jangan jadi sampah tab.
                 if (tab.popup && adblock() && isAd(url)) {
@@ -1458,6 +1527,8 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView v, String url) {
+                // Zombie watchdog: load settled, clear the stamp.
+                tab.loadingSinceMs = 0;
                 // Deep-query helpers for the agent (idempotent re-inject).
                 v.evaluateJavascript(DEEP_QUERY_JS, null);
                 v.evaluateJavascript(NETBODY_JS, null);
@@ -1487,8 +1558,11 @@ public class MainActivity extends Activity {
                         String.valueOf(r.getUrl()));
                 if (fe != null) tab.netlog.fail(fe,
                         "net:" + String.valueOf(e.getDescription()));
-                if (r.isForMainFrame() && tab == active) {
-                    showError(String.valueOf(r.getUrl()),
+                if (r.isForMainFrame()) {
+                    // Error page = load is over (onPageFinished still
+                    // fires, but clear the zombie stamp defensively).
+                    tab.loadingSinceMs = 0;
+                    if (tab == active) showError(String.valueOf(r.getUrl()),
                             String.valueOf(e.getDescription()));
                 }
             }
@@ -1500,6 +1574,25 @@ public class MainActivity extends Activity {
                         String.valueOf(r.getUrl()));
                 if (he != null) tab.netlog.finish(he,
                         er.getStatusCode(), null, 0);
+            }
+
+            @Override
+            public boolean onRenderProcessGone(WebView v,
+                    android.webkit.RenderProcessGoneDetail d) {
+                // Agent 1.26+: a dead renderer makes EVERY evaluateJavascript
+                // callback on this WebView return null (the "zombie tab"
+                // live finding). Never leave it in place — revive the tab
+                // with a fresh WebView. Return true: we handle it.
+                tab.renderDead = true;
+                tab.loadingSinceMs = 0;
+                final int tid = tab.id;
+                final boolean crashed = d != null && d.didCrash();
+                agentLog("renderer gone (tab #" + tid
+                        + (crashed ? ", crash" : ", killed") + "), reviving",
+                        2);
+                if (isUiThread()) reviveTabUi(tid);
+                else ui.post(() -> reviveTabUi(tid));
+                return true;
             }
         };
     }
@@ -1761,17 +1854,41 @@ public class MainActivity extends Activity {
     // ---------- JS bridge (worker thread -> UI thread) ----------
 
     private String evalJs(String expr) throws Exception {
+        return evalJsOn(activeWeb(), expr);
+    }
+
+    /** Agent 1.26+: evaluate on a specific tab's WebView. The WebView is
+     * captured at call time (not when the UI runnable runs), so a tab
+     * switch racing the eval can't redirect it to the wrong tab. */
+    private String evalJsOn(WebView w, String expr) throws Exception {
         // Never block the UI thread waiting for itself -> ANR. All current
         // callers run on agent worker threads; fail fast if that changes.
         if (isUiThread())
             throw new IllegalStateException("evalJs called on UI thread");
+        if (w == null)
+            throw new IllegalStateException("no webview (tab gone?)");
         final AtomicReference<String> out = new AtomicReference<>();
+        final AtomicReference<Throwable> err = new AtomicReference<>();
         final CountDownLatch latch = new CountDownLatch(1);
-        ui.post(() -> activeWeb().evaluateJavascript(expr, v -> {
-            out.set(v);
-            latch.countDown();
-        }));
-        if (!latch.await(30, TimeUnit.SECONDS)) throw new Exception("js timeout");
+        final WebView fw = w;
+        ui.post(() -> {
+            try {
+                fw.evaluateJavascript(expr, v -> {
+                    out.set(v);
+                    latch.countDown();
+                });
+            } catch (Throwable t) {
+                // e.g. WebView destroyed mid-revive: fail fast, don't
+                // hang the full 30s on a dead view.
+                err.set(t);
+                latch.countDown();
+            }
+        });
+        if (!latch.await(30, TimeUnit.SECONDS))
+            throw new Exception("js timeout (30s)");
+        if (err.get() != null)
+            throw new Exception("evaluate failed: "
+                    + String.valueOf(err.get().getMessage()));
         String v = out.get();
         if (v != null && v.length() >= 2 && v.startsWith("\"") && v.endsWith("\"")) {
             try {
@@ -1779,6 +1896,24 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         return v;
+    }
+
+    /** Agent 1.26+: resolve the optional tab= param (body or query) to a
+     * Tab; absent -> the active tab. Lookup runs on the UI thread. */
+    private Tab tabForAgent(java.util.Map<String, String> query,
+                            JSONObject body) throws Exception {
+        String sid = body.optString("tab", null);
+        if (sid == null || sid.isEmpty()) sid = query.get("tab");
+        if (sid == null || sid.isEmpty()) return uiGet(() -> active);
+        final int id;
+        try {
+            id = Integer.parseInt(sid);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("bad tab id: " + sid);
+        }
+        Tab t = uiGet(() -> findTab(id));
+        if (t == null) throw new IllegalArgumentException("no such tab " + id);
+        return t;
     }
 
     private final ArrayList<String> agentLogBuf = new ArrayList<>();
@@ -1830,6 +1965,14 @@ public class MainActivity extends Activity {
             o.put("url", url == null ? "" : url);
             o.put("title", t.title);
             o.put("active", t == active);
+            // Agent 1.26+: zombie visibility — the agent can spot a stuck
+            // tab and close/recreate it instead of getting silent nulls.
+            boolean loading = t.loadingSinceMs > 0;
+            o.put("loading", loading);
+            if (loading) o.put("loading_ms",
+                    android.os.SystemClock.uptimeMillis() - t.loadingSinceMs);
+            o.put("render_dead", t.renderDead);
+            if (t.unstuckCount > 0) o.put("unstuck", t.unstuckCount);
         } catch (Exception ignored) {}
         return o;
     }
@@ -1842,7 +1985,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.25");
+                            oo.put("agent", "kancil-browser/1.26");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -1981,20 +2124,30 @@ public class MainActivity extends Activity {
                     agentNote("reload");
                     return ok();
                 case "/dom": {
-                    String html = evalJs("(function(){return document.documentElement.outerHTML})()");
+                    Tab dt = tabForAgent(query, body);
+                    String html = evalJsOn(dt.web, "(function(){return document.documentElement.outerHTML})()");
+                    if (html == null)
+                        // Agent 1.26+: honest error instead of silent null —
+                        // the page has no document (still navigating, or the
+                        // renderer is gone and the tab is being revived).
+                        return AgentServer.Response.err(500,
+                                "no document (tab #" + dt.id
+                                + ": still loading or renderer gone)");
                     JSONObject o = new JSONObject();
                     o.put("ok", true); o.put("html", html);
-                    agentNote("dom (" + (html == null ? 0 : html.length()) + " chars)");
+                    agentNote("dom (" + html.length() + " chars)");
                     return AgentServer.Response.json(o);
                 }
                 case "/text": {
-                    String t = evalJs("(function(){return document.body.innerText})()");
+                    Tab tt = tabForAgent(query, body);
+                    String t = evalJsOn(tt.web, "(function(){return document.body.innerText})()");
                     JSONObject o = new JSONObject();
                     o.put("ok", true); o.put("text", t);
                     return AgentServer.Response.json(o);
                 }
                 case "/reader": {
-                    String r = evalJs(READER_JS);
+                    Tab rt = tabForAgent(query, body);
+                    String r = evalJsOn(rt.web, READER_JS);
                     JSONObject o = new JSONObject();
                     o.put("ok", true); o.put("result", r);
                     agentNote("reader " + r);
@@ -2003,7 +2156,11 @@ public class MainActivity extends Activity {
                 case "/js": {
                     String expr = body.optString("expr", query.get("expr"));
                     if (expr == null) return AgentServer.Response.err(400, "missing expr");
-                    String r = evalJs(expr);
+                    // Agent 1.26+: optional tab= (body/query) evaluates on
+                    // that tab directly — no activate-then-eval race, and a
+                    // suspect tab can be probed without making it active.
+                    Tab jt = tabForAgent(query, body);
+                    String r = evalJsOn(jt.web, expr);
                     JSONObject o = new JSONObject();
                     o.put("ok", true); o.put("result", r);
                     agentNote("js");
