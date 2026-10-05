@@ -46,10 +46,14 @@ public class AgentServer {
     private final Handler handler;
     private ServerSocket server;
     private volatile boolean running;
+    /** API key (header X-Kancil-Key). null/empty = auth off (legacy). */
+    private volatile String apiKey;
 
     public AgentServer(Handler handler) {
         this.handler = handler;
     }
+
+    public void setApiKey(String k) { apiKey = k; }
 
     public void start() throws Exception {
         server = new ServerSocket(PORT, 16,
@@ -98,14 +102,31 @@ public class AgentServer {
                 query = parseQuery(target.substring(qi + 1));
             }
             int contentLength = 0;
+            Map<String, String> headers = new HashMap<>();
             for (int i = 1; i < lines.length; i++) {
                 int ci = lines[i].indexOf(':');
-                if (ci > 0 && lines[i].substring(0, ci).trim()
-                        .equalsIgnoreCase("Content-Length")) {
-                    try {
-                        contentLength = Integer.parseInt(
-                                lines[i].substring(ci + 1).trim());
-                    } catch (Exception ignored) {}
+                if (ci > 0) {
+                    String hn = lines[i].substring(0, ci).trim()
+                            .toLowerCase(java.util.Locale.US);
+                    String hv = lines[i].substring(ci + 1).trim();
+                    headers.put(hn, hv);
+                    if (hn.equals("content-length")) {
+                        try {
+                            contentLength = Integer.parseInt(hv);
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+            // API key auth (1.28+): tiap request wajib bawa X-Kancil-Key
+            // yang cocok, kecuali belum ada key yang dikonfigurasi.
+            String key = apiKey;
+            if (key != null && !key.isEmpty()) {
+                String got = headers.get("x-kancil-key");
+                if (!key.equals(got)) {
+                    writeResponse(out, Response.err(401,
+                            "unauthorized: bad or missing X-Kancil-Key"));
+                    s.close();
+                    return;
                 }
             }
             JSONObject body = new JSONObject();

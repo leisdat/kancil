@@ -3,6 +3,26 @@
 ## Unreleased
 
 ### Added
+- **Agent API key auth** (APK agent 1.28, Python): agent server
+  (127.0.0.1:8080) kini wajib header `X-Kancil-Key` di tiap request —
+  app lain di localhost tidak bisa lagi nyetir browser diam-diam.
+  - Key file-based, Kancil-local: `~/.kancil/agent.key` (0600, 256-bit
+    random). Tanpa Android Keystore — direktori private Termux sudah
+    di-sandbox OS dari app lain; Keystore tidak menambah apa-apa untuk
+    threat model ini. Modul baru `kancil/agent_key.py`.
+  - Python adalah source of truth: key dibuat sekali via
+    `get_or_create()`; tiap `_req()` mengirim header otomatis.
+  - Sinkronisasi ke app: (1) otomatis — `am start --es kancil_agent_key`
+    saat auto-launch; (2) manual — `kancil agent-key sync` (force-stop +
+    relaunch) saat server jawab 401.
+  - APK: key dari intent extra → SharedPreferences `agent_api_key` →
+    generate random sekali; `AgentServer.setApiKey()`; 401 JSON
+    `{"ok": false, "error": "unauthorized: bad or missing X-Kancil-Key"}`;
+    key tampil (truncated, tahan-untuk-salin) di Settings → AGENT API.
+  - API `Kancil.agent_key(action)` (`show`/`regenerate`/`sync`), tool
+    action, CLI `kancil agent-key [show|regenerate|sync]`.
+  - 401 → `EngineError` jelas ("jalankan `kancil agent-key sync`"),
+    bukan "unreachable" yang membingungkan.
 - **Loop & state round** (APK agent 1.27 + Python, ide Farul 2026-10-05):
   - **`wait_for(expr_js, timeout, poll_ms)`** — polling kondisi JS arbitrer
     (spinner hilang, teks muncul, count N) tanpa agent polling manual.

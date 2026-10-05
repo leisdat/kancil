@@ -337,6 +337,11 @@ def build_parser():
     md = SP("markdown",
             help="current page as clean Markdown (JS-rendered pages included)")
     md.add_argument("--max-chars", type=int, default=60000)
+    ak = SP("agent-key",
+            help="manage the agent server API key (X-Kancil-Key, APK 1.28+)")
+    ak.add_argument("action", nargs="?", default="show",
+                    choices=["show", "regenerate", "sync"],
+                    help="show (default) | regenerate | sync (push key to app)")
     net = SP("network", help="network log")
     net.add_argument("action", nargs="?", default="list")
     net.add_argument("target", nargs="?")
@@ -796,6 +801,8 @@ def dispatch(b, args):
         return b.form_fill_submit(args.id, values=values, verify=args.verify,
                                   verify_text=args.verify_text,
                                   confirm=args.confirm)
+    if c == "agent-key":
+        return b.agent_key(args.action)
     if c == "cookies-export":
         return b.cookies_export_netscape(args.path)
     if c == "markdown":

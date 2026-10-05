@@ -23,7 +23,8 @@
 > and a real-browser driving layer, all through a JSON-in/JSON-out interface.
 > **~100 KB, zero required dependencies.** Runs on Termux (Android ARM64), Linux, macOS.
 
-✨ **New:** loop & state round — `kancil wait-for` (server-side JS polling,
+✨ **New:** agent API key auth (APK 1.28 — `X-Kancil-Key` per request,
+key di `~/.kancil/agent.key`, `kancil agent-key sync`) · loop & state round — `kancil wait-for` (server-side JS polling,
 agent 1.27+) · `kancil session-export/import` (full session: HttpOnly cookies
 + localStorage, instant login recovery) · `kancil form-submit` (fill→submit→
 assert) · `kancil cookies-export` (Netscape format, curl/playwright interop) ·

@@ -5,6 +5,8 @@ import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.app.PendingIntent;
 import android.graphics.Bitmap;
 import android.net.Uri;
@@ -62,6 +64,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -147,6 +150,8 @@ public class MainActivity extends Activity {
     private AgentServer server;
     private boolean agentUp = false;
     private SharedPreferences prefs;
+    /** API key agent (header X-Kancil-Key), 1.28+. */
+    private String agentApiKey;
     /** True when the last screenshot() fell back to drawWebView()
      *  (backgrounded, no window surface): the capture is WebView-sized,
      *  so elementScreenshot() must not apply the window offset. */
@@ -225,6 +230,23 @@ public class MainActivity extends Activity {
                 ? R.style.Theme_Kancil_Dark : R.style.Theme_Kancil);
         super.onCreate(b);
         prefs = p0;
+        // Agent API key (1.28+): tiap request ke agent server wajib bawa
+        // header X-Kancil-Key. Prioritas: intent extra (dari `am start
+        // --es kancil_agent_key` oleh kancil Python) > SharedPreferences >
+        // generate random sekali.
+        String intentKey = getIntent() != null
+                ? getIntent().getStringExtra("kancil_agent_key") : null;
+        String ak = prefs.getString("agent_api_key", null);
+        if (intentKey != null && !intentKey.isEmpty()) {
+            ak = intentKey;
+            prefs.edit().putString("agent_api_key", ak).apply();
+        }
+        if (ak == null || ak.isEmpty()) {
+            ak = UUID.randomUUID().toString().replace("-", "")
+                    + UUID.randomUUID().toString().replace("-", "");
+            prefs.edit().putString("agent_api_key", ak).apply();
+        }
+        agentApiKey = ak;
         installCrashRecovery();
         setContentView(R.layout.activity_main);
         webContainer = findViewById(R.id.web_container);
@@ -740,6 +762,25 @@ public class MainActivity extends Activity {
         root.addView(cbDark);
         root.addView(cbKeep);
         root.addView(cbStealth);
+
+        root.addView(thinDivider());
+        root.addView(sectionHeader("AGENT API"));
+        final TextView keyView = new TextView(this);
+        final String fullKey = agentApiKey != null ? agentApiKey : "-";
+        keyView.setText("Key: " + (fullKey.length() > 16
+                ? fullKey.substring(0, 16) + "..." : fullKey)
+                + "\n(tahan untuk salin key penuh)");
+        keyView.setTextColor(themeText());
+        keyView.setTextSize(13);
+        keyView.setPadding(0, dp(4), 0, dp(4));
+        keyView.setOnLongClickListener(v -> {
+            ClipboardManager cm = (ClipboardManager)
+                    getSystemService(CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(ClipData.newPlainText("kancil-agent-key", fullKey));
+            Toast.makeText(this, "API key disalin", Toast.LENGTH_SHORT).show();
+            return true;
+        });
+        root.addView(keyView);
 
         ScrollView sv = new ScrollView(this);
         sv.addView(root);
@@ -2004,7 +2045,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.27");
+                            oo.put("agent", "kancil-browser/1.28");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -2936,6 +2977,7 @@ public class MainActivity extends Activity {
                     return AgentServer.Response.err(404, "unknown path: " + path);
             }
         });
+        server.setApiKey(agentApiKey);
         try {
             server.start();
             agentUp = true;

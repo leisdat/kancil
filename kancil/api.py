@@ -877,6 +877,29 @@ class Kancil:
         return ok(markdown=md, **stats,
                   url=getattr(p, "url", ""))
 
+    # ---------- agent API key (APK 1.28+) ----------
+    def agent_key(self, action="show"):
+        """Kelola API key agent server (header X-Kancil-Key).
+
+        show: tampilkan key + lokasi file; regenerate: bikin key baru
+        (wajib `agent-key sync` setelahnya); sync: push key ke app
+        (force-stop + relaunch dengan key yang benar)."""
+        from . import agent_key as ak
+        fn = getattr(self.engine, "sync_agent_key", None)
+        if not fn and action == "sync":
+            return fail("agent_key sync needs the webview engine")
+        if action == "regenerate":
+            k = ak.regenerate()
+            if hasattr(self.engine, "_api_key"):
+                self.engine._api_key = k
+            return ok(action="regenerate", key=k, path=ak.key_path(),
+                      note="run `kancil agent-key sync` to push it to the app")
+        if action == "sync":
+            return self._wrap(fn())
+        k = ak.get_or_create()
+        return ok(action="show", key=k, path=ak.key_path(),
+                  mode_ok=ak.key_mode_ok())
+
     def network_curl(self, rid):
         """Replay a logged request as a copy-pasteable curl command."""
         import shlex
@@ -1967,6 +1990,7 @@ class Kancil:
         "session_export": "{path, cookie_origins, storage_origins}",
         "session_import": "{cookies_loaded, storage_injected[]}",
         "cookies_export_netscape": "{path, cookies}",
+        "agent_key": "{action, key, path}",
         "form_fill_submit": "{filled, submitted, verified?}",
         "markdown": "{markdown, chars}",
         "network": "{requests[{id,t,method,url,status}]}",
@@ -2531,6 +2555,7 @@ Kancil._TOOL_ACTIONS = {
     "session_import": lambda s, p: s.session_import(p.get("path", "")),
     "cookies_export_netscape": lambda s, p: s.cookies_export_netscape(
         p.get("path", "")),
+    "agent_key": lambda s, p: s.agent_key(p.get("action", "show")),
     # forms + markdown
     "form_fill_submit": lambda s, p: s.form_fill_submit(
         int(p.get("id", 1)), values=p.get("values"), verify=p.get("verify"),

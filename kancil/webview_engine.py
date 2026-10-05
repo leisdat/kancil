@@ -19,6 +19,7 @@ import urllib.request
 from . import engines
 from .engines import EngineError
 from . import session as session_mod
+from . import agent_key
 
 
 class WebViewEngine:
@@ -68,6 +69,13 @@ class WebViewEngine:
         # clicks and form submits unless confirm=True is passed explicitly.
         # Guards against an agent accidentally publishing (e.g. FB composer).
         self.dry_run = bool(kwargs.get("dry_run", False))
+        # agent API key (APK 1.28+): X-Kancil-Key di tiap request.
+        # Source of truth di ~/.kancil/agent.key; di-push ke app lewat
+        # intent extra saat auto-launch, atau `agent-key sync`.
+        try:
+            self._api_key = agent_key.get_or_create()
+        except Exception:
+            self._api_key = None
         # fail fast with a clear message when the app isn't running;
         # with auto_launch, try starting it first (agent self-heal).
         st = self._status_or_none()
@@ -91,6 +99,8 @@ class WebViewEngine:
         if body is not None:
             data = json.dumps(body).encode()
             headers["Content-Type"] = "application/json"
+        if getattr(self, "_api_key", None):
+            headers["X-Kancil-Key"] = self._api_key
         req = urllib.request.Request(url, data=data, headers=headers,
                                      method=method)
         try:
@@ -102,6 +112,11 @@ class WebViewEngine:
                 return {"ok": True, "raw": raw,
                         "content_type": ct}
         except urllib.error.HTTPError as e:
+            if e.code == 401:
+                raise EngineError(
+                    "webview agent: API key ditolak (401). "
+                    "Jalankan `kancil agent-key sync` untuk push key ke app, "
+                    "atau update kancil Python kalau masih versi lama.")
             # the app answers errors as JSON too: {"ok": false, "error": ...}
             try:
                 err = json.loads(e.read().decode("utf-8", "replace"))
@@ -1648,6 +1663,34 @@ class WebViewEngine:
     APP_PACKAGE = "com.kancil.browser"
     APP_ACTIVITY = "com.kancil.browser/.MainActivity"
 
+    def _am_start_args(self):
+        """`am start` args; selipkan API key sebagai intent extra supaya
+        app menyimpan key yang sama dengan Python (source of truth)."""
+        args = ["am", "start", "-n", self.APP_ACTIVITY]
+        key = getattr(self, "_api_key", None)
+        if key:
+            args += ["--es", "kancil_agent_key", key]
+        return args
+
+    def sync_agent_key(self):
+        """Push API key Python ke app: force-stop + relaunch dengan key baru.
+
+        Dipakai saat server jawab 401 (app dibuka manual dengan key lama,
+        atau key habis di-regenerate). Destruktif (app restart) — hanya
+        dipanggil eksplisit via `kancil agent-key sync`, tidak otomatis."""
+        key = getattr(self, "_api_key", None) or agent_key.get_or_create()
+        self._api_key = key
+        try:
+            subprocess.run(["am", "force-stop", "com.kancil.browser"],
+                           capture_output=True, timeout=8)
+        except Exception:
+            pass  # not Android / no `am`
+        time.sleep(0.5)
+        r = self.ensure_alive(retries=2, relaunch=True, wait=1.5)
+        if r.get("success"):
+            r["key_synced"] = True
+        return r
+
     def ensure_alive(self, retries=2, relaunch=True, wait=1.5):
         """Check the app agent is reachable; optionally relaunch it.
 
@@ -1681,7 +1724,7 @@ class WebViewEngine:
                             "errors": [str(e)[:200]]}
                 try:
                     subprocess.run(
-                        ["am", "start", "-n", self.APP_ACTIVITY],
+                        self._am_start_args(),
                         capture_output=True, timeout=8)
                 except Exception:
                     pass  # not Android / no `am` — give up quietly
