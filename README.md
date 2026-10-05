@@ -31,7 +31,8 @@ assert) · `kancil cookies-export` (Netscape format, curl/playwright interop) ·
 `back`/`fwd --verify` · rate-limit-aware retry (Retry-After, static engine) ·
 TLS fingerprint impersonation (`kancil stealth impersonate`,
 6 browser profiles) · WebView anti-detect JS injection · `kancil session clear`
-with per-domain cookie wipe · APK agent 1.26 (zombie-tab fix: watchdog
+with per-domain cookie wipe · APK agent 1.27 (`/wait_for` server-side polling,
+`/cookies/dump`+`/load` incl. HttpOnly, zombie-tab fix: watchdog
 loading + onRenderProcessGone revive + eval per-tab, NetLog HTTP status fix,
 screenshot 1x1 + recycled-bitmap fix, dry_run guard buat touch/upload/download,
 Aliyun PIL fallback anti-CORS; `/touch` tap/swipe/pinch + human-like swipe +
