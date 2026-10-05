@@ -16,6 +16,19 @@ Two layers, both optional and dependency-light:
    checker can still detect it. Re-apply after every navigation, because a
    page load wipes injected JS.
 
+Layering contract (two sources, no conflict): the APK's MainActivity
+injects a minimal baseline on every page load (webdriver=undefined +
+window.chrome stubs). ``apply_stealth()`` layers the full 10-vector
+STEALTH_JS on top when you call it explicitly — applied later, so it
+wins on overlap, and it is idempotent (safe to re-apply after each
+navigation, which you must: page loads wipe it).
+
+Flavor note: STEALTH_JS is desktop-Chrome flavored (platform Win32,
+userAgentData mobile:false, Chromium 124 brands) — it pairs with the
+``chrome124`` desktop TLS profile. With the default ``chrome_android``
+TLS profile the JS vectors stay desktop-flavored while TLS says
+Android; consistent enough for most gates, but not a matched pair.
+
 Nothing here phones home or changes default behaviour: stealth is opt-in.
 """
 

@@ -1529,6 +1529,23 @@ class MoatTest(unittest.TestCase):
                 os.environ["HOME"] = old_home
         self.assertEqual(found, fake)
 
+    def test_sync_page_lone_surrogate_no_crash(self):
+        # pw_engine.py:174 used errors="html" (invalid handler) -> LookupError
+        # on dirty pages with lone surrogates. Must degrade, not crash.
+        from kancil.pw_engine import PlaywrightEngine
+
+        class FakePage:
+            def content(self):
+                return "<html><body>dirty \ud800 surrogate</body></html>"
+            url = "https://x.test/"
+
+        eng = PlaywrightEngine.__new__(PlaywrightEngine)
+        eng.tabs = [{"pw_page": FakePage()}]
+        eng.cur = 0
+        pg = eng._sync_page()
+        self.assertEqual(pg.url, "https://x.test/")
+        pg.raw.decode("utf-8")  # must be valid UTF-8, no crash
+
     def test_find_camoufox_none(self):
         from kancil import pw_engine
         empty = tempfile.mkdtemp()

@@ -171,7 +171,9 @@ class PlaywrightEngine(engines.StaticEngine):
         except Exception:
             html = ""
         from .engines import Page
-        pg = Page(p.url, 200, html.encode("utf-8", "html"), "text/html")
+        pg = Page(p.url, 200, html.encode("utf-8", "replace"),
+                 "text/html")  # "replace": lone surrogates in dirty
+                             # scraped content must not crash _sync_page
         return pg
 
     @property

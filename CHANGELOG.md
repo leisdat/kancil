@@ -23,6 +23,15 @@
   `touch()`, `upload()`, `download()` — sebelumnya cuma `click()` dan
   `submit_form()`. `confirm` di-thread lewat API, CLI (`--confirm`), dan
   solver Aliyun.
+- **pw_engine latent crash** (Python): `_sync_page()` pakai
+  `html.encode("utf-8", "html")` — handler error `"html"` tidak valid,
+  `LookupError` saat konten halaman punya lone surrogate. Ganti
+  `errors="replace"` + regression test.
+- **Stealth layering contract** (docs): didokumentasikan dua sumber
+  snippet — baseline minimal MainActivity vs full 10-vektor
+  `apply_stealth()` (menang saat overlap, idempotent) — plus flavor
+  note: snippet desktop-Chrome (Win32) paling pas dipasangkan profil
+  TLS `chrome124`, bukan default `chrome_android`.
 - **Aliyun CORS fallback** (Python): kalau analisis pixel in-page gagal
   (fetch kena CORS di `static-captcha.aliyuncs.com`), solver otomatis
   fallback ke analisis Python/PIL — download native tanpa CORS,
