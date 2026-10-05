@@ -23,7 +23,13 @@
 > scraper + inspection tool** secara native, terstruktur, dan agent-friendly.
 > **~100 KB, nol dependency wajib.** Jalan di Termux Android (ARM64), Linux, macOS.
 
-✨ **Baru:** impersonasi fingerprint TLS (`kancil stealth impersonate`,
+✨ **Baru:** ronde loop & state — `kancil wait-for` (polling JS server-side,
+agent 1.27+) · `kancil session-export/import` (sesi penuh: cookie HttpOnly +
+localStorage, recovery login instan) · `kancil form-submit` (isi→submit→
+assert) · `kancil cookies-export` (format Netscape, interop curl/playwright) ·
+`kancil markdown` (halaman JS-rendered → Markdown bersih, tanpa dep) ·
+`back`/`fwd --verify` · retry sadar rate-limit (Retry-After, engine static) ·
+impersonasi fingerprint TLS (`kancil stealth impersonate`,
 6 profil browser) · injeksi JS anti-detect buat WebView · `kancil session clear`
 dengan wipe cookie per-domain · APK agent 1.26 (fix zombie-tab: watchdog
 loading + revive onRenderProcessGone + eval per-tab, fix status HTTP NetLog,

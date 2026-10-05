@@ -1916,6 +1916,25 @@ public class MainActivity extends Activity {
         return t;
     }
 
+    /** Agent 1.27+: parse a long from the query map with a default. */
+    private static long parseLongQ(java.util.Map<String, String> query,
+                                   String key, long def) {
+        try {
+            String v = query.get(key);
+            if (v != null && !v.isEmpty()) return Long.parseLong(v);
+        } catch (Exception ignored) {}
+        return def;
+    }
+
+    /** Agent 1.27+: is an evalJsOn result truthy? Handles the JSON-encoded
+     * strings evaluateJavascript returns ("true", "null", "\"\"", "0"). */
+    private static boolean isTruthyJs(String v) {
+        if (v == null) return false;
+        String t = v.trim();
+        return !(t.isEmpty() || t.equals("null") || t.equals("false")
+                || t.equals("0") || t.equals("\"\""));
+    }
+
     private final ArrayList<String> agentLogBuf = new ArrayList<>();
 
     private void agentNote(final String msg) {
@@ -1985,7 +2004,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.26");
+                            oo.put("agent", "kancil-browser/1.27");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -2164,6 +2183,54 @@ public class MainActivity extends Activity {
                     JSONObject o = new JSONObject();
                     o.put("ok", true); o.put("result", r);
                     agentNote("js");
+                    return AgentServer.Response.json(o);
+                }
+                case "/wait_for": {
+                    // Agent 1.27+: poll an arbitrary JS condition server-side
+                    // so the agent doesn't burn a round-trip per 300ms.
+                    // expr should evaluate to something truthy when the
+                    // condition holds, e.g. "!document.querySelector('.spin')"
+                    String expr = body.optString("expr", query.get("expr"));
+                    if (expr == null || expr.isEmpty())
+                        return AgentServer.Response.err(400, "missing expr");
+                    long timeoutMs = body.optLong("timeout_ms", 0);
+                    if (timeoutMs <= 0) timeoutMs = parseLongQ(query, "timeout_ms", 0);
+                    if (timeoutMs <= 0) timeoutMs = 10000;
+                    timeoutMs = Math.min(timeoutMs, 120000);
+                    long pollMs = body.optLong("poll_ms", 0);
+                    if (pollMs <= 0) pollMs = parseLongQ(query, "poll_ms", 0);
+                    if (pollMs <= 0) pollMs = 300;
+                    pollMs = Math.max(100, Math.min(pollMs, 5000));
+                    Tab wt = tabForAgent(query, body);
+                    final WebView ww = wt.web;
+                    long start = android.os.SystemClock.uptimeMillis();
+                    String lastVal = null;
+                    boolean matched = false;
+                    while (android.os.SystemClock.uptimeMillis() - start
+                            < timeoutMs) {
+                        try {
+                            lastVal = evalJsOn(ww, expr);
+                        } catch (Exception e) {
+                            // transient (navigating, reviving?) — keep polling
+                            lastVal = null;
+                        }
+                        if (isTruthyJs(lastVal)) { matched = true; break; }
+                        try { Thread.sleep(pollMs); }
+                        catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                    long waited = android.os.SystemClock.uptimeMillis() - start;
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true);
+                    o.put("matches", matched);
+                    o.put("timed_out", !matched);
+                    o.put("waited_ms", waited);
+                    if (lastVal != null) o.put("value", lastVal);
+                    o.put("tab", wt.id);
+                    agentNote("wait_for " + (matched ? "matched" : "timeout")
+                            + " " + waited + "ms");
                     return AgentServer.Response.json(o);
                 }
                 case "/console": {
@@ -2628,6 +2695,93 @@ public class MainActivity extends Activity {
                         return null;
                     });
                     return ok();
+                }
+                case "/cookies/dump": {
+                    // Agent 1.27+: export cookies incl. HttpOnly ones
+                    // (CookieManager.getCookie returns them — the HttpOnly
+                    // restriction only binds document.cookie JS access).
+                    // url= dumps one origin; omitted = all open tabs' URLs.
+                    String durl = body.optString("url", query.get("url"));
+                    final java.util.ArrayList<String> durls =
+                            new java.util.ArrayList<>();
+                    if (durl != null && !durl.isEmpty()) durls.add(durl);
+                    else {
+                        java.util.List<String> tu = uiGet(() -> {
+                            java.util.ArrayList<String> l =
+                                    new java.util.ArrayList<>();
+                            for (Tab t : tabs) {
+                                try {
+                                    String u = t.web.getUrl();
+                                    if (u != null && !u.isEmpty()
+                                            && !l.contains(u)) l.add(u);
+                                } catch (Exception ignored) {}
+                            }
+                            return l;
+                        });
+                        durls.addAll(tu);
+                    }
+                    CookieManager dcm = CookieManager.getInstance();
+                    JSONObject dd = new JSONObject();
+                    int dn = 0;
+                    for (String u : durls) {
+                        String raw;
+                        try { raw = dcm.getCookie(u); }
+                        catch (Exception e) { raw = null; }
+                        if (raw != null && !raw.isEmpty()) {
+                            dd.put(u, raw);
+                            dn++;
+                        }
+                    }
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true); o.put("dumps", dd); o.put("count", dn);
+                    agentNote("cookies dump " + dn + " origins");
+                    return AgentServer.Response.json(o);
+                }
+                case "/cookies/load": {
+                    // Agent 1.27+: restore a /cookies/dump payload.
+                    // {dumps: [{url, cookies: "a=b; c=d"}]}. Honest limit:
+                    // CookieManager.setCookie can't re-apply the HttpOnly
+                    // FLAG (platform ignores it) — but values restore fine
+                    // and the server accepts them, so sessions recover.
+                    JSONArray la = body.optJSONArray("dumps");
+                    if (la == null)
+                        return AgentServer.Response.err(400,
+                                "missing dumps[]");
+                    final java.util.ArrayList<String[]> pairs =
+                            new java.util.ArrayList<>();
+                    for (int li = 0; li < la.length(); li++) {
+                        JSONObject e = la.optJSONObject(li);
+                        if (e == null) continue;
+                        String u = e.optString("url", "");
+                        String c = e.optString("cookies", "");
+                        if (!u.isEmpty() && !c.isEmpty())
+                            pairs.add(new String[]{u, c});
+                    }
+                    uiGet(() -> {
+                        CookieManager lcm = CookieManager.getInstance();
+                        for (String[] p : pairs) {
+                            for (String part : p[1].split(";")) {
+                                int ei = part.indexOf('=');
+                                if (ei > 0) {
+                                    String nv = part.substring(0, ei).trim()
+                                            + "="
+                                            + part.substring(ei + 1).trim()
+                                            + "; Path=/";
+                                    try { lcm.setCookie(p[0], nv); }
+                                    catch (Exception ignored) {}
+                                }
+                            }
+                        }
+                        lcm.flush();
+                        return null;
+                    });
+                    JSONObject o = new JSONObject();
+                    o.put("ok", true); o.put("loaded", pairs.size());
+                    o.put("note", "HttpOnly flags can't be re-applied via "
+                            + "CookieManager (platform limit); values "
+                            + "restored");
+                    agentNote("cookies load " + pairs.size() + " origins");
+                    return AgentServer.Response.json(o);
                 }
                 case "/ua/reset": {
                     uiGet(() -> {

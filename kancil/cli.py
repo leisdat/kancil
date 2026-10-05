@@ -167,8 +167,14 @@ def build_parser():
     sp.add_argument("--verify", default=None,
                     help="webview: selector that must appear after open "
                          "(validator pattern)")
-    SP("back", help="go back")
-    SP("fwd", help="go forward")
+    bk = SP("back", help="go back (with --verify to assert the landed page)")
+    bk.add_argument("--verify", default=None,
+                    help="CSS selector that must appear after navigation")
+    bk.add_argument("--verify-text", default=None,
+                    help="text that must appear after navigation")
+    fw = SP("fwd", help="go forward (with --verify to assert the landed page)")
+    fw.add_argument("--verify", default=None)
+    fw.add_argument("--verify-text", default=None)
     SP("reload", help="reload page")
     SP("tabs", help="list tabs")
     sp = SP("new-tab", help="new tab")
@@ -304,6 +310,33 @@ def build_parser():
     se = SP("see-describe",
             help="describe the current screen in words (vision API)")
     se.add_argument("--question", default="")
+    wf = SP("wait-for",
+            help="wait until a JS expression is truthy (server-side polling, agent 1.27+)")
+    wf.add_argument("expr", help="JS expression, e.g. \"!document.querySelector('.spinner')\"")
+    wf.add_argument("--timeout-ms", type=int, default=10000)
+    wf.add_argument("--poll-ms", type=int, default=300)
+    sx = SP("session-export",
+            help="save login session (cookies incl. HttpOnly + localStorage) to file")
+    sx.add_argument("path")
+    si = SP("session-import",
+            help="restore a session-export file (instant login recovery)")
+    si.add_argument("path")
+    fs = SP("form-submit",
+            help="fill a form, submit it, assert the result — one call")
+    fs.add_argument("id", type=int, help="form id (from the forms list)")
+    fs.add_argument("--values", default=None,
+                    help='JSON map of field name -> value, e.g. \'{"q":"kancil"}\'')
+    fs.add_argument("--verify", default=None,
+                    help="CSS selector that must appear after submit")
+    fs.add_argument("--verify-text", default=None,
+                    help="text that must appear after submit")
+    fs.add_argument("--confirm", action="store_true")
+    ce = SP("cookies-export",
+            help="export cookies as Netscape cookies.txt (curl/playwright interop)")
+    ce.add_argument("path")
+    md = SP("markdown",
+            help="current page as clean Markdown (JS-rendered pages included)")
+    md.add_argument("--max-chars", type=int, default=60000)
     net = SP("network", help="network log")
     net.add_argument("action", nargs="?", default="list")
     net.add_argument("target", nargs="?")
@@ -641,9 +674,9 @@ def dispatch(b, args):
             r["waited_ms"] = wait_ms
         return r
     if c == "back":
-        return b.back()
+        return b.back(verify=args.verify, verify_text=args.verify_text)
     if c == "fwd":
-        return b.forward()
+        return b.forward(verify=args.verify, verify_text=args.verify_text)
     if c == "reload":
         return b.reload()
     if c == "tabs":
@@ -745,6 +778,33 @@ def dispatch(b, args):
                           human=args.human, confirm=args.confirm)
     if c == "see-describe":
         return b.vision_describe(question=args.question)
+    if c == "wait-for":
+        return b.wait_for(args.expr, timeout_ms=args.timeout_ms,
+                          poll_ms=args.poll_ms)
+    if c == "session-export":
+        return b.session_export(args.path)
+    if c == "session-import":
+        return b.session_import(args.path)
+    if c == "form-submit":
+        values = None
+        if args.values:
+            try:
+                values = json.loads(args.values)
+            except Exception as e:
+                return {"success": False,
+                        "errors": ["--values must be JSON: %s" % str(e)[:100]]}
+        return b.form_fill_submit(args.id, values=values, verify=args.verify,
+                                  verify_text=args.verify_text,
+                                  confirm=args.confirm)
+    if c == "cookies-export":
+        return b.cookies_export_netscape(args.path)
+    if c == "markdown":
+        r = b.markdown(max_chars=args.max_chars)
+        if r.get("success") and not (getattr(args, "json", False)
+                                     or getattr(args, "raw", False)):
+            print(r["markdown"])
+            return {"success": True, "_printed": True}
+        return r
     if c == "network":
         if args.har:
             return b.har_export(args.har, redact=not args.no_redact)

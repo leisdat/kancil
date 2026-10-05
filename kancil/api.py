@@ -7,6 +7,7 @@ import json
 import os
 import re
 import time
+import urllib.parse
 
 from . import engines
 from . import session as session_mod
@@ -174,12 +175,34 @@ class Kancil:
         return self._wrap(r)
 
     @_with_delta
-    def back(self):
-        return self._wrap(self.engine.back())
+    def back(self, verify=None, verify_text=None):
+        """Go back; with verify/verify_text, assert the landed page instead
+        of silently sitting on an error page."""
+        r = self._wrap(self.engine.back())
+        if not r.get("success"):
+            return r
+        return self._nav_verify(r, verify, verify_text, "back")
 
     @_with_delta
-    def forward(self):
-        return self._wrap(self.engine.forward())
+    def forward(self, verify=None, verify_text=None):
+        """Go forward; with verify/verify_text, assert the landed page."""
+        r = self._wrap(self.engine.forward())
+        if not r.get("success"):
+            return r
+        return self._nav_verify(r, verify, verify_text, "forward")
+
+    def _nav_verify(self, r, verify, verify_text, op):
+        if verify is None and verify_text is None:
+            return r
+        w = self.wait(selector=verify, text=verify_text)
+        if w.get("success"):
+            r["verified"] = verify if verify is not None else verify_text
+            return r
+        errs = w.get("errors") or ["verify failed"]
+        return self._wrap(fail(
+            "%s verify failed (landed on error page?): %s"
+            % (op, str(errs[0])[:150]),
+            verify=verify if verify is not None else verify_text))
 
     @_with_delta
     def reload(self):
@@ -651,6 +674,208 @@ class Kancil:
             self.engine, from_desc, to_desc, backend=backend,
             template=template, dry_run=self.dry_run, confirm=confirm,
             human=human))
+
+    # ---------- wait_for / session / forms / cookies / markdown (1.27) ----------
+    def wait_for(self, expr, timeout_ms=10000, poll_ms=300):
+        """Wait until a JS expression is truthy — polled server-side (agent 1.27+).
+
+        e.g. wait_for("!document.querySelector('.spinner')") — spinner gone;
+        wait_for("document.querySelectorAll('.item').length>=5") — count reached.
+        One round trip instead of a manual polling loop."""
+        fn = getattr(self.engine, "wait_for", None)
+        if not fn:
+            return fail("wait_for needs the webview engine (agent 1.27+)")
+        return self._wrap(fn(expr, timeout_ms=timeout_ms, poll_ms=poll_ms))
+
+    def session_export(self, path):
+        """Save the login session to a JSON file: cookies (incl. HttpOnly)
+        per origin + localStorage of every open tab's origin.
+
+        Restore later (even after the app was killed) with session_import().
+        Swap accounts by saving/loading different files."""
+        fn = getattr(self.engine, "cookies_dump", None)
+        if not fn:
+            return fail("session_export needs the webview engine (agent 1.27+)")
+        cd = self.engine.cookies_dump()
+        if not cd.get("success"):
+            return self._wrap(cd)
+        data = {"kancil_session": 1,
+                "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "cookies": cd.get("dumps", {}) or {},
+                "storage": {}}
+        try:
+            tabs = self.engine.list_tabs()
+        except Exception:
+            tabs = []
+        cur = next((t["id"] for t in tabs if t.get("current")), None)
+        for t in tabs:
+            url = t.get("url") or ""
+            if not url.startswith("http"):
+                continue
+            try:
+                self.engine.switch_tab(t["id"])
+                st = self.engine.storage("local")
+                if isinstance(st, dict) and "__error__" not in st and st:
+                    data["storage"][url] = st
+            except Exception:
+                continue
+        if cur is not None:
+            try:
+                self.engine.switch_tab(cur)
+            except Exception:
+                pass
+        try:
+            with open(path, "w") as f:
+                json.dump(data, f)
+        except Exception as e:
+            return fail("cannot write %s: %s" % (path, str(e)[:120]))
+        return ok(path=path, cookie_origins=len(data["cookies"]),
+                  storage_origins=len(data["storage"]))
+
+    def session_import(self, path):
+        """Restore a session_export() file: cookies globally, then localStorage
+        per origin (temp tab per origin: navigate, inject, reload, close).
+
+        Login once, recover instantly — even after the app was killed."""
+        fn = getattr(self.engine, "cookies_load", None)
+        if not fn:
+            return fail("session_import needs the webview engine (agent 1.27+)")
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except Exception as e:
+            return fail("cannot read %s: %s" % (path, str(e)[:120]))
+        if not isinstance(data, dict) or data.get("kancil_session") != 1:
+            return fail("not a kancil session file: %s" % path)
+        out = {}
+        cd = self.engine.cookies_load(data.get("cookies") or {})
+        out["cookies_loaded"] = cd.get("loaded", 0) if cd.get("success") \
+            else 0
+        if not cd.get("success"):
+            out["cookies_error"] = cd.get("errors")
+        storage = data.get("storage") or {}
+        injected, failed = [], []
+        try:
+            tabs = self.engine.list_tabs()
+        except Exception:
+            tabs = []
+        cur = next((t["id"] for t in tabs if t.get("current")), None)
+        for url, kv in storage.items():
+            if not isinstance(kv, dict) or not kv:
+                continue
+            tmp = None
+            try:
+                tmp = self.engine.new_tab(url)
+                tid = tmp.get("tab")
+                self.engine.wait_idle(timeout=10)
+                n = 0
+                for k, v in kv.items():
+                    sr = self.engine.storage_set(k, v, "local")
+                    if isinstance(sr, dict) and sr.get("success"):
+                        n += 1
+                self.engine.reload()
+                injected.append({"url": url, "keys": n})
+            except Exception as e:
+                failed.append({"url": url, "error": str(e)[:120]})
+            finally:
+                try:
+                    if tmp and tmp.get("tab"):
+                        self.engine.close_tab(tmp["tab"])
+                except Exception:
+                    pass
+        if cur is not None:
+            try:
+                self.engine.switch_tab(cur)
+            except Exception:
+                pass
+        out["storage_injected"] = injected
+        if failed:
+            out["storage_failed"] = failed
+        return ok(**out)
+
+    @_with_delta
+    def form_fill_submit(self, form_id, values=None, verify=None,
+                         verify_text=None, auto=False, confirm=False):
+        """Fill a form, submit it, and assert the result — one call.
+
+        verify: CSS selector expected after submit; verify_text: text
+        instead. For farm/automation loops that shouldn't guess."""
+        fill = self.form_fill(form_id, values=values, auto=auto)
+        if not fill.get("success"):
+            return fill
+        sub = self.form_submit(form_id, confirm=confirm)
+        if not sub.get("success"):
+            return self._wrap({**sub, "filled": True})
+        if verify is None and verify_text is None:
+            return self._wrap({"success": True, "filled": True,
+                               "submitted": True})
+        w = self.wait(selector=verify, text=verify_text)
+        if w.get("success"):
+            return self._wrap({"success": True, "filled": True,
+                               "submitted": True,
+                               "verified": verify
+                               if verify is not None else verify_text})
+        errs = w.get("errors") or ["verify failed"]
+        return self._wrap(fail(
+            "form submit verify failed: %s" % str(errs[0])[:150],
+            filled=True, submitted=True,
+            verify=verify if verify is not None else verify_text))
+
+    def cookies_export_netscape(self, path):
+        """Export cookies as Netscape cookies.txt (curl/playwright interop).
+
+        Pairs with the existing cookies_import. Domain flags are honest:
+        exact host, not assumed subdomain-wide."""
+        fn = getattr(self.engine, "cookies_dump", None)
+        if not fn:
+            return fail("cookies_export_netscape needs the webview engine "
+                        "(agent 1.27+)")
+        cd = self.engine.cookies_dump()
+        if not cd.get("success"):
+            return self._wrap(cd)
+        lines = ["# Netscape HTTP Cookie File",
+                 "# exported by kancil session"]
+        n = 0
+        for url, raw in (cd.get("dumps") or {}).items():
+            host = urllib.parse.urlparse(url).hostname or ""
+            if not host:
+                continue
+            for part in raw.split(";"):
+                if "=" not in part:
+                    continue
+                name, val = part.split("=", 1)
+                name, val = name.strip(), val.strip()
+                if not name:
+                    continue
+                lines.append("\t".join(
+                    [host, "FALSE", "/", "FALSE", "0", name, val]))
+                n += 1
+        try:
+            with open(path, "w") as f:
+                f.write("\n".join(lines) + "\n")
+        except Exception as e:
+            return fail("cannot write %s: %s" % (path, str(e)[:120]))
+        return ok(path=path, cookies=n)
+
+    def markdown(self, max_chars=60000):
+        """Current page as clean Markdown (JS-rendered pages included).
+
+        Zero-dependency HTML->markdown: headings, links, lists, tables,
+        code — nav/header/footer/script stripped."""
+        p, err = self._page_or_fail()
+        if err:
+            return err
+        raw = getattr(p, "raw", None)
+        html = raw.decode("utf-8", "replace") \
+            if isinstance(raw, bytes) else (raw or "")
+        if not html.strip():
+            return fail("page has no HTML")
+        from .markdown import html_to_markdown
+        md, stats = html_to_markdown(html, max_chars=max_chars)
+        if not md:
+            return fail("no readable content found")
+        return ok(markdown=md, **stats,
+                  url=getattr(p, "url", ""))
 
     def network_curl(self, rid):
         """Replay a logged request as a copy-pasteable curl command."""
@@ -1738,6 +1963,12 @@ class Kancil:
         "uncheck": "{unchecked, delta?}", "hover": "{hovered, delta?}",
         "focus": "{focused, delta?}", "scroll": "{scrolled, delta?}",
         "evaluate": "{result}", "wait": "{found, waited_ms}",
+        "wait_for": "{matches, waited_ms, value}",
+        "session_export": "{path, cookie_origins, storage_origins}",
+        "session_import": "{cookies_loaded, storage_injected[]}",
+        "cookies_export_netscape": "{path, cookies}",
+        "form_fill_submit": "{filled, submitted, verified?}",
+        "markdown": "{markdown, chars}",
         "network": "{requests[{id,t,method,url,status}]}",
         "network_request": "{id, headers, ...}",
         "network_response": "{id, status, body}",
@@ -1926,16 +2157,18 @@ class Kancil:
         "question": "apa isi keranjang?", "from_desc": "gagang slider",
         "to_desc": "ujung kanan trek", "template": "/sdcard/icon.png",
         "backend": "api", "verify": "#success",
+        "expr": "!document.querySelector('.spinner')",
+        "verify_text": "Pesanan diterima",
     }
     _TOOL_STR_HINTS = {"selector", "url", "text", "query", "xpath", "js",
                        "expression", "path", "file", "key", "kind", "name",
                        "value", "role", "target", "pattern", "type",
                        "method", "action", "domain", "title", "question",
                        "description", "from_desc", "to_desc", "template",
-                       "backend", "verify"}
+                       "backend", "verify", "expr", "verify_text"}
     _TOOL_INT_HINTS = {"ms", "id", "tab", "limit", "max_nodes", "fidx",
                        "did", "index", "n", "retries", "timeout",
-                       "max_tries"}
+                       "max_tries", "timeout_ms", "poll_ms", "max_chars"}
     _TOOL_BOOL_HINTS = {"confirm", "idle", "full", "clear", "verbose"}
 
     @classmethod
@@ -2253,8 +2486,10 @@ Kancil._TOOL_ACTIONS = {
     "open": lambda s, p: s.open(p.get("url", ""),
                         idle=p.get("idle", False),
                         verify=p.get("verify")),
-    "back": lambda s, p: s.back(),
-    "forward": lambda s, p: s.forward(),
+    "back": lambda s, p: s.back(verify=p.get("verify"),
+                               verify_text=p.get("verify_text")),
+    "forward": lambda s, p: s.forward(verify=p.get("verify"),
+                                       verify_text=p.get("verify_text")),
     "reload": lambda s, p: s.reload(),
     "history": lambda s, p: s.history(),
     # tabs
@@ -2288,6 +2523,21 @@ Kancil._TOOL_ACTIONS = {
     "evaluate": lambda s, p: s.evaluate(p.get("js", p.get("expression", ""))),
     "wait": lambda s, p: s.wait(selector=p.get("selector"),
                                 ms=p.get("ms"), text=p.get("text")),
+    "wait_for": lambda s, p: s.wait_for(
+        p.get("expr", ""), timeout_ms=int(p.get("timeout_ms", 10000)),
+        poll_ms=int(p.get("poll_ms", 300))),
+    # session persist (agent 1.27+)
+    "session_export": lambda s, p: s.session_export(p.get("path", "")),
+    "session_import": lambda s, p: s.session_import(p.get("path", "")),
+    "cookies_export_netscape": lambda s, p: s.cookies_export_netscape(
+        p.get("path", "")),
+    # forms + markdown
+    "form_fill_submit": lambda s, p: s.form_fill_submit(
+        int(p.get("id", 1)), values=p.get("values"), verify=p.get("verify"),
+        verify_text=p.get("verify_text"), auto=bool(p.get("auto", False)),
+        confirm=bool(p.get("confirm", False))),
+    "markdown": lambda s, p: s.markdown(
+        max_chars=int(p.get("max_chars", 60000))),
     # network
     "network": lambda s, p: s.network(
         pattern=p.get("pattern"), limit=int(p.get("limit", 50)),

@@ -774,6 +774,53 @@ class WebViewEngine:
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
+    def wait_for(self, expr, timeout_ms=10000, poll_ms=300, tab=None):
+        """Poll an arbitrary JS condition server-side (agent 1.27+).
+
+        expr should evaluate to something truthy when the condition holds,
+        e.g. "!document.querySelector('.spinner')" (wait until the spinner
+        is gone) or "document.querySelectorAll('.item').length >= 5".
+        One round trip instead of polling /js from the client every 300ms.
+        Falls back to client-side polling on older agents.
+        """
+        body = {"expr": expr, "timeout_ms": int(timeout_ms),
+                "poll_ms": int(poll_ms)}
+        if tab is not None:
+            body["tab"] = str(tab)
+        try:
+            r = self._post("/wait_for", body)
+        except Exception:
+            r = None
+        if isinstance(r, dict) and r.get("ok"):
+            return {"success": True, "matches": bool(r.get("matches")),
+                    "timed_out": bool(r.get("timed_out")),
+                    "waited_ms": r.get("waited_ms", 0),
+                    "value": r.get("value"), "tab": r.get("tab"),
+                    "server_side": True}
+        # fallback: agent < 1.27 has no /wait_for — poll /js from here
+        deadline = time.time() + min(int(timeout_ms), 120000) / 1000.0
+        step = max(int(poll_ms), 100) / 1000.0
+        last = None
+        js_body = {"expr": expr}
+        if tab is not None:
+            js_body["tab"] = str(tab)
+        while time.time() < deadline:
+            try:
+                jr = self._post("/js", js_body)
+                last = jr.get("result") if isinstance(jr, dict) else None
+            except Exception:
+                last = None
+            if last not in (None, "null", "false", "0", "", '""'):
+                return {"success": True, "matches": True,
+                        "timed_out": False, "waited_ms": 0,
+                        "value": last, "server_side": False,
+                        "note": "client-side fallback (agent < 1.27)"}
+            time.sleep(step)
+        return {"success": True, "matches": False, "timed_out": True,
+                "waited_ms": int(timeout_ms), "value": last,
+                "server_side": False,
+                "note": "client-side fallback (agent < 1.27)"}
+
     def wait_idle(self, timeout=15, quiet_ms=800):
         """Wait until the page settles like a human would: document
         complete AND no network activity for quiet_ms. One round trip,
@@ -1007,6 +1054,41 @@ class WebViewEngine:
             return out
         except Exception:
             return []
+
+    def cookies_dump(self, url=None):
+        """Export raw cookie strings per origin, INCLUDING HttpOnly ones
+        (agent 1.27+). url= dumps one origin; omitted = all open tabs' URLs.
+        Returns {url: "name=value; ..."} — feed to cookies_load() or
+        session_save()."""
+        try:
+            path = "/cookies/dump"
+            if url:
+                path += "?url=" + urllib.parse.quote(url, safe="")
+            r = self._get(path)
+            if isinstance(r, dict) and r.get("ok"):
+                return {"success": True, "dumps": r.get("dumps", {}),
+                        "count": r.get("count", 0)}
+            return {"success": False, "errors": [str(r)[:200]]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
+
+    def cookies_load(self, dumps):
+        """Restore a cookies_dump() payload. dumps: {url: "a=b; c=d"} or
+        [{url, cookies}]. HttpOnly VALUES restore fine; the HttpOnly flag
+        itself can't be re-applied (platform limit) — sessions still work."""
+        try:
+            if isinstance(dumps, dict):
+                items = [{"url": u, "cookies": c}
+                         for u, c in dumps.items()]
+            else:
+                items = list(dumps or [])
+            r = self._post("/cookies/load", {"dumps": items})
+            if isinstance(r, dict) and r.get("ok"):
+                return {"success": True, "loaded": r.get("loaded", 0),
+                        "note": r.get("note", "")}
+            return {"success": False, "errors": [str(r)[:200]]}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
 
     def network(self, pattern=None, limit=50, type_=None, status=None,
                 method=None):
@@ -1524,7 +1606,34 @@ class WebViewEngine:
             return {"success": False, "errors": [str(e)[:200]]}
 
     def perf(self, url=None):
-        raise EngineError("perf not supported by the webview agent v1")
+        """Load timing via Navigation Timing + paint entries (pure JS, no
+        agent support needed). Returns ms since navigationStart; -1 means
+        the event hasn't fired yet (page still loading)."""
+        js = ("(function(){var t=performance.timing,nav=t.navigationStart;"
+              "var o={domContentLoaded:t.domContentLoadedEventEnd-nav,"
+              "load:t.loadEventEnd-nav,domInteractive:t.domInteractive-nav,"
+              "responseEnd:t.responseEnd-nav,firstPaint:-1};"
+              "try{var ps=performance.getEntriesByType('paint');"
+              "for(var i=0;i<ps.length;i++)"
+              "{if(ps[i].name==='first-paint')"
+              "o.firstPaint=Math.round(ps[i].startTime);}}catch(e){}"
+              "for(var k in o){if(!(o[k]>=0))o[k]=-1;}"
+              "return JSON.stringify(o);})()")
+        try:
+            r = self.evaluate(js)
+            if not r.get("success"):
+                return {"success": False, "errors": r.get("errors")}
+            try:
+                data = json.loads(r.get("result") or "{}")
+            except Exception:
+                data = {}
+            if not isinstance(data, dict) or not data:
+                return {"success": False,
+                        "errors": ["no timing data (page still loading?)"]}
+            data["url"] = self._cur_url()
+            return {"success": True, **data}
+        except Exception as e:
+            return {"success": False, "errors": [str(e)[:200]]}
 
     def request(self, *a, **kw):
         raise EngineError("raw request() is static-engine only")

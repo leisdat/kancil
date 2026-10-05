@@ -23,7 +23,13 @@
 > and a real-browser driving layer, all through a JSON-in/JSON-out interface.
 > **~100 KB, zero required dependencies.** Runs on Termux (Android ARM64), Linux, macOS.
 
-✨ **New:** TLS fingerprint impersonation (`kancil stealth impersonate`,
+✨ **New:** loop & state round — `kancil wait-for` (server-side JS polling,
+agent 1.27+) · `kancil session-export/import` (full session: HttpOnly cookies
++ localStorage, instant login recovery) · `kancil form-submit` (fill→submit→
+assert) · `kancil cookies-export` (Netscape format, curl/playwright interop) ·
+`kancil markdown` (JS-rendered page → clean Markdown, zero-dep) ·
+`back`/`fwd --verify` · rate-limit-aware retry (Retry-After, static engine) ·
+TLS fingerprint impersonation (`kancil stealth impersonate`,
 6 browser profiles) · WebView anti-detect JS injection · `kancil session clear`
 with per-domain cookie wipe · APK agent 1.26 (zombie-tab fix: watchdog
 loading + onRenderProcessGone revive + eval per-tab, NetLog HTTP status fix,

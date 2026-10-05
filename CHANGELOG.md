@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Added
+- **Loop & state round** (APK agent 1.27 + Python, ide Farul 2026-10-05):
+  - **`wait_for(expr_js, timeout, poll_ms)`** — polling kondisi JS arbitrer
+    (spinner hilang, teks muncul, count N) tanpa agent polling manual.
+    Server-side (endpoint APK `/wait_for`, cap 120 dtk, toleran error
+    transient); client-side fallback untuk agent <1.27. API
+    `Kancil.wait_for()`, tool action, CLI `kancil wait-for`.
+  - **Session export/import penuh** — `session_export(path)` /
+    `session_import(path)`: cookies termasuk HttpOnly (via CookieManager
+    Java: `/cookies/dump`, `/cookies/load`) per origin + localStorage
+    tiap origin tab yang terbuka. Login sekali, recovery instan bahkan
+    setelah app di-kill (ganti akun = file berbeda).
+  - **`form_fill_submit()`** — isi form → submit → assert hasil dalam
+    satu panggilan (`verify` selector / `verify_text`), untuk loop
+    farm/otomasi. CLI `kancil form-submit`.
+  - **`cookies_export_netscape(path)`** — export cookies format Netscape
+    `cookies.txt` untuk interop curl/playwright/engine lain (pasangan
+    dari `cookies_import` yang sudah ada). CLI `kancil cookies-export`.
+  - **`markdown()`** — halaman JS-rendered → markdown bersih (headings,
+    links, lists, tables, code; nav/header/footer/script di-strip).
+    Converter `kancil/markdown.py` stdlib-only, tanpa dependency baru.
+    CLI `kancil markdown`.
+  - **`back(verify=)/forward(verify=)`** — navigasi dengan validasi hasil
+    (selector/teks harus muncul, bukan halaman error diam-diam).
+    CLI `kancil back --verify`, `kancil fwd --verify`.
+  - **Rate-limit-aware retry** (static engine): 429/503 → baca header
+    `Retry-After` (detik atau HTTP date, cap 60 dtk), sleep otomatis,
+    retry dalam budget attempt; cooldown dilaporkan di netlog entry +
+    error console (`type: rate_limit`). Buat scraping/farm.
+- Tool actions 115 → **121**; manifest `agent-info` ikut update otomatis.
+
 ### Fixed
 - **Zombie tab** (APK agent 1.26, temuan live): satu tab WebView yang
   masuk loading permanen / renderer mati bikin seluruh evaluate JS

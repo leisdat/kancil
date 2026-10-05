@@ -38,6 +38,27 @@ def parse_query_params(url):
     return out
 
 
+def _parse_retry_after(value):
+    """Retry-After header value -> seconds (float), or None if absent/garbage.
+
+    Handles both forms: delta-seconds ("120") and an HTTP date."""
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return float(value)
+    try:
+        from email.utils import parsedate_to_datetime
+        import datetime
+        dt = parsedate_to_datetime(value)
+        if dt is None:
+            return None
+        now = datetime.datetime.now(dt.tzinfo)
+        return max(0.0, (dt - now).total_seconds())
+    except Exception:
+        return None
+
+
 def parse_cookie_header(value):
     """'a=1; b=2' -> {'a': '1', 'b': '2'}."""
     out = {}
@@ -873,6 +894,34 @@ class StaticEngine:
                         entry["timing"]["duration"] = entry["ms"]
                         self._log(entry)
                         return final, 200, ctype, raw, dict(rh)
+                # Rate-limit-aware retry: 429/503 -> honor Retry-After
+                # (capped), sleep, retry inside the attempt budget.
+                # The cooldown is reported in the netlog entry + errors.
+                if e.code in (429, 503) and attempt < self.retries:
+                    wait_s = _parse_retry_after(
+                        e.headers.get("Retry-After"))
+                    if wait_s is None:
+                        wait_s = 2.0 * (attempt + 1)  # backoff fallback
+                    wait_s = min(max(wait_s, 0.0), 60.0)
+                    entry.update({"status": e.code,
+                                  "ms": int((time.time() - t0) * 1000),
+                                  "rate_limited": True,
+                                  "cooldown_s": round(wait_s, 1)})
+                    try:
+                        entry["res_headers"] = dict(e.headers.items())
+                    except Exception:
+                        pass
+                    entry["timing"]["duration"] = entry["ms"]
+                    self._log(entry)
+                    self.errors.append({"type": "rate_limit", "url": url,
+                                        "status": e.code,
+                                        "cooldown_s": round(wait_s, 1),
+                                        "t": entry["t"]})
+                    last_err = EngineError(
+                        "HTTP %d for %s (rate limited, cooldown %.1fs)"
+                        % (e.code, url, wait_s))
+                    time.sleep(wait_s)
+                    continue
                 entry.update({"status": e.code, "ms": int((time.time() - t0) * 1000)})
                 entry["timing"]["duration"] = entry["ms"]
                 try:
