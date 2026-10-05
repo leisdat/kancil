@@ -256,6 +256,8 @@ def build_parser():
     al.add_argument("--max-tries", type=int, default=4)
     al.add_argument("--handle-sel", default=".slider-move")
     al.add_argument("--puzzle-sel", default="img.puzzle")
+    al.add_argument("--confirm", action="store_true",
+                    help="required to actuate in --dry-run mode")
     an = SP("aliyun-analyze",
             help="dry-run Aliyun gap detection (no dragging)")
     an.add_argument("--handle-sel", default=None)
@@ -322,9 +324,13 @@ def build_parser():
     dl = SP("download", help="download URL")
     dl.add_argument("url")
     dl.add_argument("--out", default=None)
+    dl.add_argument("--confirm", action="store_true",
+                    help="required to actuate in --dry-run mode")
     SP("downloads", help="download manager")
     up = SP("upload", help="stage file for next file-chooser (webview engine)")
     up.add_argument("path")
+    up.add_argument("--confirm", action="store_true",
+                    help="required to actuate in --dry-run mode")
     SP("videos", help="list <video> elements (webview engine)")
     dp = SP("dlpause", help="pause download")
     dp.add_argument("id", type=int)
@@ -414,6 +420,8 @@ def build_parser():
                     help="longpress hold / swipe duration")
     tc.add_argument("--human", action="store_true",
                     help="human-like swipe trajectory (bezier, ease-in-out)")
+    tc.add_argument("--confirm", action="store_true",
+                    help="required to actuate in --dry-run mode")
 
     stl = SP("stealth", help="browser impersonation / anti-detect")
     stl.add_argument("action", choices=["status", "impersonate", "apply"],
@@ -667,7 +675,8 @@ def dispatch(b, args):
     if c == "aliyun-solve":
         return b.solve_aliyun_puzzle(max_tries=args.max_tries,
                                      handle_sel=args.handle_sel,
-                                     puzzle_sel=args.puzzle_sel)
+                                     puzzle_sel=args.puzzle_sel,
+                                     confirm=args.confirm)
     if c == "aliyun-analyze":
         return b.aliyun_analyze(handle_sel=args.handle_sel,
                                 puzzle_sel=args.puzzle_sel)
@@ -772,11 +781,11 @@ def dispatch(b, args):
         if args.action == "submit":
             return b.form_submit(args.id, confirm=args.confirm)
     if c == "download":
-        return b.download(args.url, args.out)
+        return b.download(args.url, args.out, confirm=args.confirm)
     if c == "downloads":
         return b.downloads()
     if c == "upload":
-        return b.upload(args.path)
+        return b.upload(args.path, confirm=args.confirm)
     if c == "videos":
         return b.videos()
     if c == "dlpause":
@@ -875,7 +884,8 @@ def dispatch(b, args):
         return b.touch(action=args.action, x=args.x, y=args.y,
                        x2=args.x2, y2=args.y2, selector=args.selector,
                        duration_ms=args.duration_ms,
-                       human=getattr(args, "human", False))
+                       human=getattr(args, "human", False),
+                       confirm=args.confirm)
     if c == "blocklist":
         a = args.action
         if a == "add":

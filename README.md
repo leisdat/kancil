@@ -25,10 +25,12 @@
 
 ✨ **New:** TLS fingerprint impersonation (`kancil stealth impersonate`,
 6 browser profiles) · WebView anti-detect JS injection · `kancil session clear`
-with per-domain cookie wipe · APK agent 1.24 (`/touch` tap/swipe/pinch +
-human-like swipe + down/move/up primitives, base64 upload, auto-launch via
-`am start`, `/blocklist` CLI, XHR/fetch response-body capture, Aliyun
-closed-loop slider solver) · validator pattern (`click`/`type`/`open
+with per-domain cookie wipe · APK agent 1.25 (NetLog HTTP status fix,
+screenshot 1x1 + recycled-bitmap fix, dry_run guard buat touch/upload/download,
+Aliyun PIL fallback anti-CORS; `/touch` tap/swipe/pinch + human-like swipe +
+down/move/up primitives, base64 upload, auto-launch via `am start`,
+`/blocklist` CLI, XHR/fetch response-body capture, Aliyun closed-loop
+slider solver) · validator pattern (`click`/`type`/`open
 --verify`) · stealth status in `kancil doctor`.
 
 ```bash

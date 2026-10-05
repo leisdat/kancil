@@ -89,6 +89,19 @@ public class NetLog {
         return entries.size();
     }
 
+    /** Most recent entry for url whose status is still unknown
+     *  (shouldInterceptRequest only logs; statuses are stamped by
+     *  onPageFinished / onReceivedHttpError since WebView does not
+     *  expose subresource statuses). */
+    public synchronized Entry latestFor(String url) {
+        for (int i = entries.size() - 1; i >= 0; i--) {
+            Entry e = entries.get(i);
+            if (e.status == null && e.error == null
+                    && url != null && url.equals(e.url)) return e;
+        }
+        return null;
+    }
+
     /** Millis timestamp of the most recent request, or 0 if empty.
      *  Used by /wait/idle to detect network quiet. */
     public synchronized long lastT0() {

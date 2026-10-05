@@ -1471,15 +1471,35 @@ public class MainActivity extends Activity {
                 }
                 saveTabs();
                 CookieManager.getInstance().flush();
+                // NetLog mitigation (agent 1.25+): shouldInterceptRequest
+                // only logs requests — WebView never exposes subresource
+                // statuses, so finish() had no caller. Stamp the main-frame
+                // entry 200 here; errors are stamped in
+                // onReceivedHttpError / onReceivedError below.
+                NetLog.Entry f = tab.netlog.latestFor(url);
+                if (f != null) tab.netlog.finish(f, 200, null, 0);
             }
 
             @Override
             public void onReceivedError(WebView v, WebResourceRequest r,
                                         android.webkit.WebResourceError e) {
+                NetLog.Entry fe = tab.netlog.latestFor(
+                        String.valueOf(r.getUrl()));
+                if (fe != null) tab.netlog.fail(fe,
+                        "net:" + String.valueOf(e.getDescription()));
                 if (r.isForMainFrame() && tab == active) {
                     showError(String.valueOf(r.getUrl()),
                             String.valueOf(e.getDescription()));
                 }
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView v, WebResourceRequest r,
+                                            WebResourceResponse er) {
+                NetLog.Entry he = tab.netlog.latestFor(
+                        String.valueOf(r.getUrl()));
+                if (he != null) tab.netlog.finish(he,
+                        er.getStatusCode(), null, 0);
             }
         };
     }
@@ -1822,7 +1842,7 @@ public class MainActivity extends Activity {
                         try {
                             String url = activeWeb().getUrl();
                             oo.put("ok", true);
-                            oo.put("agent", "kancil-browser/1.24");
+                            oo.put("agent", "kancil-browser/1.25");
                             oo.put("url", url == null ? "" : url);
                             oo.put("title", active.title);
                             oo.put("tab", active.id);
@@ -2811,6 +2831,23 @@ public class MainActivity extends Activity {
     }
 
     private byte[] screenshot() throws Exception {
+        // Fresh-tab race: right after open()/tab creation the WebView
+        // may not be laid out yet (getWidth()==0). A capture then would
+        // silently degrade to a 1x1 PNG. Wait bounded for layout first.
+        long wt0 = android.os.SystemClock.uptimeMillis();
+        int[] wd = uiGet(() -> {
+            WebView wv = activeWeb();
+            return new int[]{wv.getWidth(), wv.getHeight()};
+        });
+        while ((wd[0] <= 0 || wd[1] <= 0)
+                && android.os.SystemClock.uptimeMillis() - wt0 < 2000) {
+            try { Thread.sleep(150); }
+            catch (InterruptedException ie) { break; }
+            wd = uiGet(() -> {
+                WebView wv = activeWeb();
+                return new int[]{wv.getWidth(), wv.getHeight()};
+            });
+        }
         final AtomicReference<Bitmap> ref = new AtomicReference<>();
         final AtomicReference<Throwable> errRef = new AtomicReference<>();
         final CountDownLatch latch = new CountDownLatch(1);
@@ -2862,7 +2899,13 @@ public class MainActivity extends Activity {
      *  Must run on the UI thread. Fallback when PixelCopy can't run. */
     private Bitmap drawWebView() {
         WebView wv = activeWeb();
-        int w = Math.max(1, wv.getWidth()), h = Math.max(1, wv.getHeight());
+        int w = wv.getWidth(), h = wv.getHeight();
+        // Never mask a 0-size WebView with Math.max(1,...): that used to
+        // produce a fake 1x1 "successful" PNG. Fail loudly instead —
+        // the caller converts this to a 500 with a clear message.
+        if (w <= 0 || h <= 0)
+            throw new IllegalStateException(
+                    "webview not laid out (" + w + "x" + h + ")");
         Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         wv.draw(new android.graphics.Canvas(b));
         return b;
@@ -3005,12 +3048,16 @@ public class MainActivity extends Activity {
                 Math.max(1, (int) (eh * scale)));
         if (cw <= 0 || ch <= 0)
             throw new Exception("element outside capture area");
+        // createBitmap(subset) may SHARE bmp's pixel buffer (or even
+        // return the same object). Recycling bmp before compress used to
+        // throw "Can't compress a recycled bitmap" — recycle only after.
         Bitmap crop = Bitmap.createBitmap(bmp, cx, cy, cw, ch);
-        bmp.recycle();
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         crop.compress(Bitmap.CompressFormat.PNG, 90, bos);
+        byte[] out = bos.toByteArray();
+        if (crop != bmp) bmp.recycle();
         crop.recycle();
-        return bos.toByteArray();
+        return out;
     }
 
     /** Fill form #fi with {name: value}. Values starting with "@" are

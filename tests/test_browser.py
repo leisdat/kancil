@@ -2388,6 +2388,12 @@ class WebViewAgentHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"ok": True})
             else:
                 self._err(400, "cannot close the last tab")
+        elif p == "/touch":
+            self._json({"ok": True, "action": body.get("action")})
+        elif p == "/download":
+            self._json({"ok": True, "id": 1, "url": body.get("url")})
+        elif p == "/upload":
+            self._json({"ok": True, "path": "/staged/x.png"})
         else:
             self.send_response(404)
             self.end_headers()
@@ -2425,6 +2431,30 @@ class WebViewEngineTest(unittest.TestCase):
             self.assertIn("dry-run", r["errors"][0])
             r = eng.submit_form(0, confirm=True)
             self.assertTrue(r["success"], r)
+            r = eng.touch("tap", x=10, y=20)
+            self.assertFalse(r["success"])
+            self.assertIn("dry-run", r["errors"][0])
+            r = eng.touch("tap", x=10, y=20, confirm=True)
+            self.assertTrue(r["success"], r)
+            r = eng.download("https://x.test/f.apk")
+            self.assertFalse(r["success"])
+            self.assertIn("dry-run", r["errors"][0])
+            r = eng.download("https://x.test/f.apk", confirm=True)
+            self.assertTrue(r["success"], r)
+            r = eng.upload("/nonexistent/x.png")
+            self.assertFalse(r["success"])
+            self.assertIn("dry-run", r["errors"][0])
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".png",
+                                             delete=False) as fh:
+                fh.write(b"\x89PNG\r\n\x1a\n")
+                tp = fh.name
+            try:
+                r = eng.upload(tp, confirm=True)
+                self.assertTrue(r["success"], r)
+            finally:
+                import os
+                os.unlink(tp)
         finally:
             eng.close()
 
@@ -3935,3 +3965,79 @@ class AliyunSolverTest(unittest.TestCase):
         self.assertEqual(a.handle_sel, ".slider-move")
         b = p.parse_args(["aliyun-analyze"])
         self.assertIsNone(b.handle_sel)
+
+
+class AliyunPILFallbackTest(unittest.TestCase):
+    """Python-side gap detection (no page CORS): synthetic images."""
+
+    def _imgs(self, gap=True, alpha=True):
+        from PIL import Image, ImageDraw
+        import random
+        random.seed(7)
+        W, H = 300, 150
+        pu = Image.new("RGB", (W, H))
+        px = pu.load()
+        for y in range(H):
+            for x in range(W):
+                px[x, y] = (random.randint(0, 255),
+                            random.randint(0, 255),
+                            random.randint(0, 255))
+        if gap:
+            d = ImageDraw.Draw(pu)
+            d.rectangle([180, 0, 215, H - 1], fill=(175, 172, 178))
+        if alpha:
+            st = Image.new("RGBA", (50, 150), (0, 0, 0, 0))
+            ImageDraw.Draw(st).ellipse([8, 40, 42, 110],
+                                       fill=(200, 100, 50, 255))
+        else:
+            st = Image.new("RGB", (50, 150), (90, 40, 200))
+        return pu, st
+
+    def _run(self, pu, st, display_w=300):
+        from kancil import aliyun
+        orig = aliyun._fetch_img
+        aliyun._fetch_img = lambda url, timeout=20: (
+            {"p": pu, "s": st}[url])
+        try:
+            return aliyun.analyze_pil("p", "s", display_w)
+        finally:
+            aliyun._fetch_img = orig
+
+    def test_pil_gap_detect(self):
+        pu, st = self._imgs()
+        info = self._run(pu, st)
+        self.assertIsNotNone(info)
+        self.assertEqual(info["method"], "pil")
+        # gapCenter=197.5, pieceCx=25 -> 172.5
+        self.assertAlmostEqual(info["targetLeft"], 172.5, delta=4)
+
+    def test_pil_no_alpha_degraded(self):
+        pu, st = self._imgs(alpha=False)
+        info = self._run(pu, st)
+        self.assertIsNotNone(info)
+        self.assertAlmostEqual(info["targetLeft"], 173.0, delta=6)
+
+    def test_pil_no_gap_none(self):
+        pu, st = self._imgs(gap=False)
+        self.assertIsNone(self._run(pu, st))
+
+    def test_pil_fallback_pulls_urls_from_page(self):
+        from kancil import aliyun
+        pu, st = self._imgs()
+
+        class Eng:
+            def evaluate(self, js):
+                import json as j
+                return {"success": True, "result": j.dumps(j.dumps(
+                    {"puzzle": "p", "strip": "s",
+                     "displayW": 300, "puzzleNW": 300}))}
+
+        orig = aliyun._fetch_img
+        aliyun._fetch_img = lambda url, timeout=20: (
+            {"p": pu, "s": st}[url])
+        try:
+            info = aliyun.analyze_pil_fallback(Eng(), "img.puzzle")
+        finally:
+            aliyun._fetch_img = orig
+        self.assertIsNotNone(info)
+        self.assertAlmostEqual(info["targetLeft"], 172.5, delta=4)

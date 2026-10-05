@@ -365,7 +365,7 @@ class Kancil:
 
     def touch(self, action="tap", x=None, y=None, x2=None, y2=None,
               selector=None, duration_ms=None, distance_start=None,
-              distance_end=None, human=False):
+              distance_end=None, human=False, confirm=False):
         fn = getattr(self.engine, "touch", None)
         if not fn:
             return fail("touch needs the webview engine (agent 1.22+)",
@@ -373,7 +373,8 @@ class Kancil:
         return self._wrap(fn(action=action, x=x, y=y, x2=x2, y2=y2,
                              selector=selector, duration_ms=duration_ms,
                              distance_start=distance_start,
-                             distance_end=distance_end, human=human))
+                             distance_end=distance_end, human=human,
+                             confirm=confirm))
 
     def crashes(self, clear=False):
         if self._engine_name == "webview":
@@ -434,17 +435,20 @@ class Kancil:
         return fail("body capture not available on this engine")
 
     def solve_aliyun_puzzle(self, max_tries=4, handle_sel=".slider-move",
-                            puzzle_sel="img.puzzle", verbose=True):
+                            puzzle_sel="img.puzzle", verbose=True,
+                            confirm=False):
         """Solve an Aliyun FeiLin slide/puzzle CAPTCHA in the current tab.
 
         Closed-loop human-like drag (webview, agent 1.24+). Approach
         ported from 0xgetz/aliyun-puzzle-solver (MIT). No guarantee —
-        Aliyun's risk engine also weighs IP/behavior history."""
+        Aliyun's risk engine also weighs IP/behavior history.
+        Respects dry_run: pass confirm=True to actuate."""
         from kancil import aliyun as _al
         return {"success": True,
                 **_al.solve_aliyun_puzzle(
                     self, max_tries=max_tries, handle_sel=handle_sel,
-                    puzzle_sel=puzzle_sel, verbose=verbose)}
+                    puzzle_sel=puzzle_sel, verbose=verbose,
+                    confirm=confirm)}
 
     def aliyun_analyze(self, handle_sel=None, puzzle_sel=None):
         """Dry-run Aliyun gap detection (no dragging). For tuning."""
@@ -904,7 +908,10 @@ class Kancil:
         return self._wrap(self.engine.submit_form(form_id - 1))
 
     # ---------- downloads ----------
-    def download(self, url, path=None):
+    def download(self, url, path=None, confirm=False):
+        if self._engine_name == "webview":
+            return self._wrap(
+                self.engine.download(url, path, confirm=confirm))
         return self._wrap(self.engine.download(url, path))
 
     def downloads(self):
@@ -923,12 +930,13 @@ class Kancil:
                         supported=False)
         return self._wrap(fn())
 
-    def upload(self, path):
+    def upload(self, path, confirm=False):
         fn = getattr(self.engine, "upload", None)
         if not fn:
             return fail("agent upload needs the webview engine",
                         supported=False)
-        return self._wrap(fn(path))
+        # webview-only feature; engine here is always WebViewEngine
+        return self._wrap(fn(path, confirm=confirm))
 
     # ---------- perf ----------
     def perf(self, url=None):

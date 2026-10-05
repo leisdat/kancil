@@ -1,0 +1,23 @@
+name: kancil tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test deps
+        run: pip install pytest pillow
+      - name: Syntax check (all modules)
+        run: python -m compileall -q kancil tests
+      - name: Unit tests
+        # test_live.py is opt-in: needs public network + Chromium +
+        # playwright (see its docstring). Everything else must pass.
+        run: python -m pytest tests/ -q -p no:cacheprovider --ignore=tests/test_live.py

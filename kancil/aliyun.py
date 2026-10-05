@@ -121,6 +121,117 @@ JSON.stringify({error:String((e&&e.stack)||e)});}
             % (json.dumps(puzzle_sel), _STRIP_FIND))
 
 
+
+_UA_DL = ("Mozilla/5.0 (Linux; Android 14; POCO M4 Pro) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36")
+
+
+def _fetch_img(url, timeout=20):
+    """Download an image natively (urllib) — no page CORS involved."""
+    from PIL import Image
+    import io
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": _UA_DL,
+                                               "Referer": url})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return Image.open(io.BytesIO(r.read()))
+
+
+def _img_info_js(puzzle_sel):
+    """Puzzle/strip URLs + display width — plain strings, no CORS risk."""
+    return ("""(()=>{const p=document.querySelector(%s);
+const s=%s;
+if(!p||!s)return 'null';
+const r=p.getBoundingClientRect();
+return JSON.stringify({puzzle:p.src,strip:s.src,
+displayW:Math.round(r.width),puzzleNW:p.naturalWidth});})()"""
+            % (json.dumps(puzzle_sel), _STRIP_FIND))
+
+
+def analyze_pil(puzzle_url, strip_url, display_w):
+    """Python-side gray-veil gap detection (PIL).
+
+    Same algorithm as the in-page analyzer (ported from
+    0xgetz/aliyun-puzzle-solver, MIT): piece vertical band via the
+    strip's alpha channel, gray column scan over the background,
+    widest gray range = gap. Runs natively so a CORS-blocked
+    in-page fetch() is not fatal. Returns the same result shape,
+    or None (PIL missing / download failed / no gap found)."""
+    try:
+        from PIL import Image  # noqa
+    except ImportError:
+        return None
+    try:
+        pu = _fetch_img(puzzle_url).convert("RGB")
+        st = _fetch_img(strip_url)
+        w, h = pu.size
+        px = pu.load()
+        if "A" in st.getbands():
+            sa = st.convert("RGBA")
+            a = sa.load()
+            minx, maxx, miny, maxy = 1e9, -1, 1e9, -1
+            for y in range(sa.height):
+                for x in range(sa.width):
+                    if a[x, y][3] > 30:
+                        if x < minx:
+                            minx = x
+                        if x > maxx:
+                            maxx = x
+                        if y < miny:
+                            miny = y
+                        if y > maxy:
+                            maxy = y
+            if maxx < 0:
+                return None
+        else:
+            # no alpha (e.g. JPEG strip): degraded — middle 60% band
+            minx, maxx = 0, st.width - 1
+            miny, maxy = int(st.height * 0.2), int(st.height * 0.8)
+        bandH = max(1, maxy - miny)
+        cols = [0] * w
+        for y in range(miny, maxy + 1):
+            yy = min(y, h - 1)
+            for x in range(w):
+                R, G, B = px[x, yy]
+                mx = R if R >= G and R >= B else (G if G >= B else B)
+                mn = R if R <= G and R <= B else (G if G <= B else B)
+                if mx - mn < 40 and (R + G + B) / 3 > 140:
+                    cols[x] += 1
+        ranges, inR, s0 = [], False, 0
+        hi = max(8, round(bandH * 0.25))
+        lo = max(4, round(bandH * 0.12))
+        for x in range(w):
+            if cols[x] >= hi and not inR:
+                inR, s0 = True, x
+            elif inR and cols[x] < lo:
+                inR = False
+                ranges.append((s0, x - 1))
+        if inR:
+            ranges.append((s0, w - 1))
+        ranges = [r for r in ranges if r[1] - r[0] > 12]
+        if not ranges:
+            return None
+        ranges.sort(key=lambda r: r[1] - r[0], reverse=True)
+        gap = ranges[0]
+        gapCenterNatural = (gap[0] + gap[1]) / 2
+        pieceCx = (minx + maxx) / 2
+        scale = display_w / w if w else 1.0
+        return {"pieceCx": pieceCx,
+                "gapCenterNatural": gapCenterNatural,
+                "targetLeft": gapCenterNatural * scale - pieceCx,
+                "scale": scale, "puzzleW": w, "method": "pil"}
+    except Exception:
+        return None
+
+
+def analyze_pil_fallback(eng, puzzle_sel):
+    """Fetch img URLs from the page, run analyze_pil natively."""
+    meta = _parse(_eval(eng, _img_info_js(puzzle_sel)))
+    if not meta or not meta.get("puzzle") or not meta.get("strip"):
+        return None
+    return analyze_pil(meta["puzzle"], meta["strip"],
+                       meta.get("displayW") or meta.get("puzzleNW") or 0)
+
 def _refresh_icon_js(puzzle_sel):
     # small clickable near the puzzle panel's top-right corner
     return ("""(()=>{const p=document.querySelector(%s);
@@ -182,11 +293,11 @@ def _poll_result(engine, timeout=15):
     return None
 
 
-def _touch(engine, action, x, y):
+def _touch(engine, action, x, y, confirm=False):
     fn = getattr(engine, "touch", None)
     if fn:
-        return fn(action, x=x, y=y)
-    return engine.engine.touch(action, x=x, y=y)
+        return fn(action, x=x, y=y, confirm=confirm)
+    return engine.engine.touch(action, x=x, y=y, confirm=confirm)
 
 
 def _parse(raw):
@@ -225,6 +336,8 @@ def analyze_aliyun(engine, handle_sel=None, puzzle_sel=None,
         return {"ok": False, "reason": "captcha not ready"}
     _eval(eng, _analyze_js(puzzle_sel))
     info = _parse(_poll_result(eng))
+    if not (info and "targetLeft" in info):
+        info = analyze_pil_fallback(eng, puzzle_sel)
     out = {"ok": bool(info and "targetLeft" in info),
            "handle_sel": handle_sel, "puzzle_sel": puzzle_sel,
            "handle": [st.get("handleX"), st.get("handleY")],
@@ -234,22 +347,23 @@ def analyze_aliyun(engine, handle_sel=None, puzzle_sel=None,
     return out
 
 
-def _refresh(engine, puzzle_sel, verbose):
+def _refresh(engine, puzzle_sel, verbose, confirm=False):
     raw = _eval(engine, _refresh_icon_js(puzzle_sel))
     c = _parse(raw)
     if not c or "x" not in c:
         if verbose:
             print("[aliyun] no refresh icon found")
         return False
-    _touch(engine, "tap", c["x"], c["y"])
+    _touch(engine, "tap", c["x"], c["y"], confirm=confirm)
     time.sleep(2.2)
     if verbose:
         print("[aliyun] tapped refresh")
     return True
 
 
-def _drag_closed_loop(eng, hx, hy, target, step_pause, log):
-    _touch(eng, "down", hx, hy)
+def _drag_closed_loop(eng, hx, hy, target, step_pause, log,
+                      confirm=False):
+    _touch(eng, "down", hx, hy, confirm=confirm)
     time.sleep(0.2)  # press-and-hold like a real finger
     px = hx
     for k in range(90):
@@ -265,7 +379,7 @@ def _drag_closed_loop(eng, hx, hy, target, step_pause, log):
         step = min(14, max(3, rem * 0.35))
         px += step
         yy = hy + ((k % 5) - 2) * 0.8  # micro tremor
-        _touch(eng, "move", px, yy)
+        _touch(eng, "move", px, yy, confirm=confirm)
         time.sleep(step_pause)
     try:
         left = float(_eval(eng, _strip_left_js()) or -1)
@@ -275,7 +389,7 @@ def _drag_closed_loop(eng, hx, hy, target, step_pause, log):
     return px, ok, "reached target (final check)" if ok else "drag incomplete"
 
 
-def _traceless(engine, verbose=True):
+def _traceless(engine, verbose=True, confirm=False):
     """Click-to-verify fallback (Aliyun 'traceless' mode): no slider."""
     log = (lambda *a: print("[aliyun]", *a)) if verbose else (lambda *a: None)
     eng = getattr(engine, "engine", engine)
@@ -284,7 +398,7 @@ def _traceless(engine, verbose=True):
         return {"ok": False, "reason": "no captcha widget found"}
     log("traceless: tapping widget at",
         round(c["x"], 1), round(c["y"], 1))
-    _touch(eng, "tap", c["x"], c["y"])
+    _touch(eng, "tap", c["x"], c["y"], confirm=confirm)
     time.sleep(3)
     v = _eval(eng, _verify_js())
     if v == "gone":
@@ -295,7 +409,8 @@ def _traceless(engine, verbose=True):
 def solve_aliyun_puzzle(engine, max_tries=4, handle_sel=None,
                         puzzle_sel=None, step_pause=0.032,
                         success_text=None, enable_refresh=True,
-                        enable_traceless=True, verbose=True):
+                        enable_traceless=True, verbose=True,
+                        confirm=False):
     """Solve an Aliyun FeiLin slide/puzzle CAPTCHA in the current tab.
 
     engine: WebViewEngine or Kancil (needs agent 1.24+ for
@@ -332,7 +447,7 @@ def solve_aliyun_puzzle(engine, max_tries=4, handle_sel=None,
         if not st or not st.get("handle"):
             if enable_traceless:
                 log("no slider handle — trying traceless mode")
-                r = _traceless(engine, verbose=verbose)
+                r = _traceless(engine, verbose=verbose, confirm=confirm)
                 r["mode"] = "traceless"
                 return r
             return {"ok": False, "tries": attempt, "mode": "slider",
@@ -341,23 +456,31 @@ def solve_aliyun_puzzle(engine, max_tries=4, handle_sel=None,
         _eval(eng, _analyze_js(puzzle_sel))
         info = _parse(_poll_result(eng))
         if not info or info.get("error") or "targetLeft" not in info:
+            why = (info or {}).get("error", "no result") if isinstance(
+                info, dict) else "no result"
+            log("in-page analyze failed (%s); PIL fallback" % str(why)[:60])
+            info = analyze_pil_fallback(eng, puzzle_sel)
+            if info:
+                log("PIL fallback: targetLeft=%.1f" % info["targetLeft"])
+        if not info or "targetLeft" not in info:
             log("analyze failed; refreshing")
-            _refresh(eng, puzzle_sel, verbose) if enable_refresh else None
+            _refresh(eng, puzzle_sel, verbose, confirm=confirm) if enable_refresh else None
             continue
         target = info["targetLeft"]
         if not (target > 5) or target > info.get("puzzleW", 1e9):
             log("implausible target", round(target, 1), "- refreshing")
-            _refresh(eng, puzzle_sel, verbose) if enable_refresh else None
+            _refresh(eng, puzzle_sel, verbose, confirm=confirm) if enable_refresh else None
             continue
         log("attempt %d: targetLeft=%.1f pause=%.3f"
             % (attempt, target, pauses[(attempt - 1) % len(pauses)]))
 
         hx, hy = st["handleX"], st["handleY"]
         px, _, reason = _drag_closed_loop(
-            eng, hx, hy, target, pauses[(attempt - 1) % len(pauses)], log)
+            eng, hx, hy, target, pauses[(attempt - 1) % len(pauses)], log,
+            confirm=confirm)
         log("drag:", reason)
         time.sleep(0.3)
-        _touch(eng, "up", px, hy)
+        _touch(eng, "up", px, hy, confirm=confirm)
         time.sleep(4)
 
         v = _eval(eng, _verify_js(success_text))

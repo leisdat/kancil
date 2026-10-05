@@ -2,7 +2,39 @@
 
 ## Unreleased
 
+### Fixed
+- **NetLog HTTP status** (APK agent 1.25): `NetLog.finish()` tidak pernah
+  dipanggil — status di `network()` webview selalu null. Mitigasi:
+  `latestFor(url)` + stamp 200 di `onPageFinished`, status asli di
+  `onReceivedHttpError`, `fail()` di `onReceivedError`. Subresource tetap
+  limitasi platform WebView (tidak expose status), tapi main frame dan
+  error kini tercatat; `network(status=)` filter jadi bisa match.
+- **Screenshot 1x1 palsu** (APK agent 1.25): `drawWebView()` menutupi
+  WebView 0px dengan `Math.max(1, ...)` → PNG 1x1 97-byte yang "sukses".
+  Sekarang: tunggu layout bounded (±2 dtk) sebelum capture, dan
+  `drawWebView()` melempar error jelas ("webview not laid out") daripada
+  gambar palsu.
+- **Element screenshot "Can't compress a recycled bitmap"** (APK agent
+  1.25): `Bitmap.createBitmap(subset)` bisa share pixel buffer dengan
+  source (bahkan objek yang sama) — `bmp.recycle()` sebelum
+  `crop.compress()` membunuh pixelnya. Urutan recycle dibetulkan
+  (recycle setelah compress, guard identitas objek).
+- **dry_run bolong** (Python): guard `dry_run`/`confirm` sekarang juga di
+  `touch()`, `upload()`, `download()` — sebelumnya cuma `click()` dan
+  `submit_form()`. `confirm` di-thread lewat API, CLI (`--confirm`), dan
+  solver Aliyun.
+- **Aliyun CORS fallback** (Python): kalau analisis pixel in-page gagal
+  (fetch kena CORS di `static-captcha.aliyuncs.com`), solver otomatis
+  fallback ke analisis Python/PIL — download native tanpa CORS,
+  algoritma gray-veil yang sama. Butuh `pillow` (opsional; tanpa itu
+  fallback dilewati dengan pesan jelas). Juga dipakai
+  `aliyun-analyze`.
+
 ### Added
+- **GitHub Actions CI** (`.github/workflows/test.yml`): tiap push/PR
+  ke main jalanin `pytest tests/ --ignore=tests/test_live.py` +
+  compile check. `test_live.py` sengaja di-exclude (butuh network
+  publik + Chromium + playwright, opt-in manual).
 - **Aliyun closed-loop slider solver** (APK agent 1.24): port pendekatan
   0xgetz/aliyun-puzzle-solver (MIT) — deteksi gap via analisis pixel
   in-page (gray veil: saturasi rendah + brightness mid/high), lalu drag

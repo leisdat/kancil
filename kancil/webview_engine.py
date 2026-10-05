@@ -1260,7 +1260,7 @@ class WebViewEngine:
 
     def touch(self, action="tap", x=None, y=None, x2=None, y2=None,
               selector=None, duration_ms=None, distance_start=None,
-              distance_end=None, human=False):
+              distance_end=None, human=False, confirm=False):
         """Synthesized touch (agent 1.22+): tap / swipe / longpress / pinch.
 
         Coordinates are CSS px (like getBoundingClientRect); the app
@@ -1269,6 +1269,9 @@ class WebViewEngine:
         same as click(). pinch_in/pinch_out zoom around (x, y).
         For things JS click() can't drive: canvas, maps, custom gestures.
         """
+        if getattr(self, "dry_run", False) and not confirm:
+            return {"success": False, "errors": [
+                "dry-run: touch blocked — pass confirm=True to actuate"]}
         try:
             if action in ("pinch_in", "pinch_out"):
                 action, distance_start, distance_end = (
@@ -1321,7 +1324,7 @@ class WebViewEngine:
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
-    def upload(self, path):
+    def upload(self, path, confirm=False):
         """Stage a file for the next file-chooser (input[type=file] click).
 
         The file bytes are base64'd to the app (agent 1.19+), so ANY local
@@ -1329,6 +1332,9 @@ class WebViewEngine:
         itself. Older agents (<1.19) only accept the path-staging mode.
         """
         import base64
+        if getattr(self, "dry_run", False) and not confirm:
+            return {"success": False, "errors": [
+                "dry-run: upload blocked — pass confirm=True to actuate"]}
         try:
             if not os.path.exists(path):
                 return {"success": False,
@@ -1356,8 +1362,11 @@ class WebViewEngine:
         except Exception as e:
             return {"success": False, "errors": [str(e)[:200]]}
 
-    def download(self, url, path=None):
+    def download(self, url, path=None, confirm=False):
         """Enqueue a download via the app's DownloadManager."""
+        if getattr(self, "dry_run", False) and not confirm:
+            return {"success": False, "errors": [
+                "dry-run: download blocked — pass confirm=True to actuate"]}
         try:
             r = self._post("/download", {"url": url})
             if isinstance(r, dict) and r.get("ok"):
