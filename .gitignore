@@ -33,3 +33,10 @@ android/*.txt
 android/*.log
 android/debug.keystore
 android/app-*.apk
+# brag launch video binaries (source scripts tracked, artifacts via release)
+brag-output/work/audio*.wav
+brag-output/work/vo/
+brag-output/work/*.png
+brag-output/work/*.jpg
+brag-output/brag.mp4
+brag-output/brag.jpg

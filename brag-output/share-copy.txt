@@ -1,0 +1,3 @@
+Browsers were built for humans. Kancil is the 108 KB browser built for agents — 122 JSON tool actions, zero dependencies, runs on your phone via Termux.
+
+github.com/leisdat/kancil

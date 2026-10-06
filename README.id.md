@@ -23,6 +23,8 @@
 > scraper + inspection tool** secara native, terstruktur, dan agent-friendly.
 > **~100 KB, nol dependency wajib.** Jalan di Termux Android (ARM64), Linux, macOS.
 
+https://github.com/leisdat/kancil/releases/download/v3.15.0/brag.mp4
+
 ✨ **Baru:** auth API key agent (APK 1.28 — header `X-Kancil-Key` tiap
 request, key di `~/.kancil/agent.key`, `kancil agent-key sync`) · ronde loop & state — `kancil wait-for` (polling JS server-side,
 agent 1.27+) · `kancil session-export/import` (sesi penuh: cookie HttpOnly +
