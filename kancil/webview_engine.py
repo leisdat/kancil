@@ -58,6 +58,7 @@ class WebViewEngine:
         # (re)launch the app instead of failing immediately.
         self.auto_launch = bool(kwargs.get("auto_launch", True))
         self._healing = False  # re-entrancy guard for ensure_alive/_req
+        self._resyncing = False  # re-entrancy guard for 401 auto-sync
         self._hist = {}  # tab_id -> {"history": [], "pos": -1}
         self._last_touch_xy = None  # (x, y) CSS px dari touch terakhir
         self._a11y_refs = {}
@@ -96,7 +97,8 @@ class WebViewEngine:
 
     # ---------- transport ----------
 
-    def _req(self, method, path, body=None, _relaunched=False):
+    def _req(self, method, path, body=None, _relaunched=False,
+             _resynced=False):
         url = self.base + path
         data = None
         headers = {}
@@ -116,6 +118,20 @@ class WebViewEngine:
                 return {"ok": True, "raw": raw,
                         "content_type": ct}
         except urllib.error.HTTPError as e:
+            if e.code == 401 and not _resynced \
+                    and not getattr(self, "_resyncing", False) \
+                    and getattr(self, "auto_launch", False):
+                # Self-heal: app kemungkinan dibuka manual (punya key
+                # random sendiri) atau key habis di-regenerate. Push key
+                # Python ke app sekali via sync, lalu coba ulang request.
+                # _resynced cegah sync ulang pada retry; _resyncing cegah
+                # rekursi lewat _req di dalam sync_agent_key.
+                try:
+                    self.sync_agent_key()
+                except Exception:
+                    pass
+                return self._req(method, path, body,
+                                 _relaunched=True, _resynced=True)
             if e.code == 401:
                 raise EngineError(
                     "webview agent: API key ditolak (401). "
@@ -1709,18 +1725,25 @@ class WebViewEngine:
     def sync_agent_key(self):
         """Push API key Python ke app: force-stop + relaunch dengan key baru.
 
-        Dipakai saat server jawab 401 (app dibuka manual dengan key lama,
-        atau key habis di-regenerate). Destruktif (app restart) — hanya
-        dipanggil eksplisit via `kancil agent-key sync`, tidak otomatis."""
+        Dipanggil otomatis sekali oleh _req saat server jawab 401 (kecuali
+        auto_launch=False), atau eksplisit via `kancil agent-key sync`.
+        Destruktif (app restart)."""
         key = getattr(self, "_api_key", None) or agent_key.get_or_create()
         self._api_key = key
+        # Guard: _req di dalam ensure_alive yang kena 401 tidak boleh
+        # memicu sync lagi (rekursi tak berujung).
+        _was_resyncing = getattr(self, "_resyncing", False)
+        self._resyncing = True
         try:
-            subprocess.run(["am", "force-stop", "com.kancil.browser"],
-                           capture_output=True, timeout=8)
-        except Exception:
-            pass  # not Android / no `am`
-        time.sleep(0.5)
-        r = self.ensure_alive(retries=2, relaunch=True, wait=1.5)
+            try:
+                subprocess.run(["am", "force-stop", "com.kancil.browser"],
+                               capture_output=True, timeout=8)
+            except Exception:
+                pass  # not Android / no `am`
+            time.sleep(0.5)
+            r = self.ensure_alive(retries=2, relaunch=True, wait=1.5)
+        finally:
+            self._resyncing = _was_resyncing
         if r.get("success"):
             r["key_synced"] = True
         return r

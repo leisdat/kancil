@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed (agent-key)
+- **401 self-heal**: `_req` kini otomatis memanggil `sync_agent_key()`
+  sekali lalu mengulang request saat server jawab 401 (app dibuka manual
+  dengan key random sendiri / key habis di-regenerate) — agent tidak
+  lagi mentok menunggu `kancil agent-key sync` manual. Dijaga anti-rekursi
+  dua lapis (`_resynced` pada retry, `_resyncing` di dalam sync);
+  nonaktif bila `auto_launch=False`, dan tetap raise EngineError yang
+  jelas bila 401 bertahan setelah sync.
+
 ### Added (autopilot: agent selancar internet mandiri & nyaman)
 - **Zombie-tab watchdog** (`kancil/watchdog.py`): probe JS konstan
   `1+1` — null = zombie (belang verifikasi live 2026-10-05).

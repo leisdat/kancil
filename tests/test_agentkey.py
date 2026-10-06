@@ -18,6 +18,7 @@ def make_engine(key="testkey123"):
     e.timeout = 5
     e.auto_launch = False
     e._healing = False
+    e._resyncing = False
     e._api_key = key
     e.errors = []
     return e
@@ -78,16 +79,78 @@ class TestApiKeyHeader(unittest.TestCase):
 
     def test_401_raises_with_sync_hint(self):
         import urllib.error
-        e = make_engine("wrong")
+        e = make_engine("wrong")  # auto_launch=False -> no auto-heal
 
         def fake_urlopen(req, timeout=None):
             raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized",
                                          {}, None)
 
         with mock.patch("urllib.request.urlopen", fake_urlopen):
-            with self.assertRaises(EngineError) as cm:
-                e._req("GET", "/status")
+            with mock.patch.object(e, "sync_agent_key") as sy:
+                with self.assertRaises(EngineError) as cm:
+                    e._req("GET", "/status")
         self.assertIn("agent-key sync", str(cm.exception))
+        sy.assert_not_called()
+
+    def test_401_auto_sync_then_retry_ok(self):
+        import urllib.error
+        e = make_engine("k1")
+        e.auto_launch = True
+        calls = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise urllib.error.HTTPError(req.full_url, 401,
+                                             "Unauthorized", {}, None)
+            m = mock.MagicMock()
+            m.read.return_value = b'{"ok": true}'
+            m.headers.get.return_value = "application/json"
+            m.__enter__.return_value = m
+            return m
+
+        with mock.patch("urllib.request.urlopen", fake_urlopen):
+            with mock.patch.object(
+                    e, "sync_agent_key",
+                    return_value={"success": True,
+                                 "key_synced": True}) as sy:
+                r = e._req("GET", "/status")
+        self.assertEqual(r, {"ok": True})
+        sy.assert_called_once()
+        self.assertEqual(calls["n"], 2)
+
+    def test_401_still_401_after_sync_raises_once(self):
+        import urllib.error
+        e = make_engine("k1")
+        e.auto_launch = True
+
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized",
+                                         {}, None)
+
+        with mock.patch("urllib.request.urlopen", fake_urlopen):
+            with mock.patch.object(
+                    e, "sync_agent_key",
+                    return_value={"success": False}) as sy:
+                with self.assertRaises(EngineError):
+                    e._req("GET", "/status")
+        sy.assert_called_once()  # exactly one sync attempt, no loop
+
+    def test_401_inside_sync_does_not_recurse(self):
+        import urllib.error
+        e = make_engine("k1")
+        e.auto_launch = True
+        e._resyncing = True  # simulate being inside sync_agent_key
+
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized",
+                                         {}, None)
+
+        with mock.patch("urllib.request.urlopen", fake_urlopen):
+            with mock.patch.object(e, "sync_agent_key") as sy:
+                with self.assertRaises(EngineError):
+                    e._req("GET", "/status")
+        sy.assert_not_called()
 
     def test_no_key_no_header(self):
         e = make_engine(None)
