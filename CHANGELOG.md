@@ -2,6 +2,56 @@
 
 ## Unreleased
 
+### Added (live APIs — keyless, stdlib-only)
+- **Modul `kancil/live.py`** + 6 tool action (`live_quake`, `live_weather`,
+  `live_flights`, `live_geocode`, `live_launches`, `live_tle`) + subcommand
+  `kancil live <quake|weather|flights|geocode|launches|tle>`.
+  Sumber (semua terverifikasi 200): gempa USGS (public domain), cuaca
+  Open-Meteo (CC-BY 4.0 — atribusi "Weather data by Open-Meteo.com" selalu
+  di output), pesawat live adsb.lol (`dist` dalam nautical miles, otomatis
+  dikonversi dari km), geocoding Photon, jadwal roket Launch Library 2
+  (15 req/jam), TLE CelesTrak. 147 tool actions. Test:
+  `tests/test_live_apis.py` (25 test, mock).
+
+### Added (safety: defense prompt-injection)
+- **Pemindai pola injeksi** (`kancil/safety.py`): `scan_untrusted(text)`
+  → `{"verdict": "clean"|"suspicious"|"malicious", "findings": [...]}` —
+  deteksi special token LLM (`<|…|>`, `[INST]`, `<<SYS>>`), fake consent /
+  override instruksi (ID+EN), exfiltrasi via markdown image eksternal,
+  instruksi memory-write dari konten web, hidden unicode (U+200B–U+200F,
+  U+FEFF, U+202A–U+202E). Pola terinspirasi
+  screem500/prompt-injection-auditor (Apache-2.0), implementasi ditulis
+  ulang dari nol. **`shield_wrap(text)`** — bungkus berlapis sebelum konten
+  web masuk prompt LLM: normalisasi unicode → delimiter `[untrusted]` →
+  `SAFETY_NOTE`. `needs_confirm`/`CONFIRM_REQUIRED` tidak berubah. Test:
+  `tests/test_injection.py` (payload adversarial ID+EN + false-positive
+  check).
+
+### Added (static engine: transport httpx + HTTP/2 opsional)
+- `StaticEngine(..., http2=True)` / `Kancil(engine="static", http2=True)`
+  memakai `httpx.Client(http2=True)` bila terinstal
+  (`pip install 'kancil[http2]'` — extra opsional, bukan hard dep).
+  Cookie dua arah dengan cookie jar, netlog/cache/retry tak berubah, TLS
+  verify default tetap aktif. Tanpa httpx → diam-diam urllib (perilaku
+  lama); paket `h2` hilang → HTTP/1.1 via httpx + peringatan; `impersonate`
+  (curl_cffi) tetap prioritas. Runtime toggle: `set_http2()`. Test:
+  `tests/test_http2.py` (mock, tanpa network).
+
+### Added (stealth_tls — eksperimental)
+- **`kancil/stealth_tls.py`**: TLS client opsional dengan JA3-spoofing
+  Chrome-Android (teknik ala AnCry1596/httpx-tls, murni Python).
+  ClientHello dirakit byte-per-byte dari vektor fingerprint; handshake via
+  `tlslite-ng` (dependensi opsional — tanpa itu builder/JA3 tetap jalan,
+  `available()` False dan `get()` menolak dengan pesan jelas). Beda dari
+  httpx-tls: **verifikasi rantai sertifikat WAJIB** (CA bundle sistem/
+  certifi + hostname RFC 6125-ish; tidak pernah fail-open);
+  `randomize_extensions` default MATI. API:
+  `StealthTLSClient(fingerprint="chrome_android").get(url)` →
+  `(status, headers, body)`. JUJUR: terverifikasi byte-level (ClientHello
+  == vektor, JA3 == expected); **belum teruji live** (egress VM via MITM
+  proxy) — tanpa klaim bypass Cloudflare/WAF. Test:
+  `tests/test_stealth_tls.py` (34 test; skip bila tlslite-ng tak ada).
+
 ### Fixed (agent-key)
 - **401 self-heal**: `_req` kini otomatis memanggil `sync_agent_key()`
   sekali lalu mengulang request saat server jawab 401 (app dibuka manual

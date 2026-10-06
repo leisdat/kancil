@@ -486,6 +486,26 @@ def build_parser():
     cl.add_argument("action", choices=["save", "load", "clear"])
     cl.add_argument("host", nargs="?", default=None)
 
+    lv = SP("live", help="query API publik keyless: gempa (USGS), cuaca "
+                         "(Open-Meteo), pesawat ADS-B (adsb.lol), geocode "
+                         "(Photon), jadwal roket (Launch Library 2), "
+                         "TLE satelit (CelesTrak)")
+    lv.add_argument("kind", choices=["quake", "weather", "flights",
+                                     "geocode", "launches", "tle"])
+    lv.add_argument("--lat", type=float, default=None)
+    lv.add_argument("--lon", type=float, default=None)
+    lv.add_argument("--radius", type=float, default=None,
+                    help="radius km (quake default 500, flights default 100)")
+    lv.add_argument("--min-mag", type=float, default=4.5, dest="min_mag")
+    lv.add_argument("-q", "--query", default=None,
+                    help="nama tempat untuk geocode")
+    lv.add_argument("--limit", type=int, default=5,
+                    help="jumlah peluncuran (launches)")
+    lv.add_argument("--norad-id", type=int, default=None, dest="norad_id",
+                    help="CATNR satelit untuk TLE (default: grup stations)")
+    lv.add_argument("--group", default="stations",
+                    help="grup TLE CelesTrak (stations, visual, weather, ...)")
+
     ha = SP("har", help="HAR recording session")
     ha.add_argument("action", choices=["start", "stop", "export", "clear", "stats"])
     ha.add_argument("path", nargs="?", default="network.har")
@@ -1061,6 +1081,22 @@ def dispatch(b, args):
         if args.action == "load":
             return b.clearance_load(args.host)
         return b.clearance_clear(args.host)
+    if c == "live":
+        k = args.kind
+        if k == "quake":
+            return b.live_quake(args.lat, args.lon,
+                                radius_km=args.radius or 500,
+                                min_mag=args.min_mag)
+        if k == "weather":
+            return b.live_weather(args.lat, args.lon)
+        if k == "flights":
+            return b.live_flights(args.lat, args.lon,
+                                  radius_km=args.radius or 100)
+        if k == "geocode":
+            return b.live_geocode(args.query)
+        if k == "launches":
+            return b.live_launches(args.limit)
+        return b.live_tle(norad_id=args.norad_id, group=args.group)
     if c == "health":
         from . import watchdog as _wd
         c = _wd.check(b)

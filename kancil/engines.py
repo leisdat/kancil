@@ -9,12 +9,14 @@ engine-specific features.
 """
 import hashlib
 import http.cookiejar
+import io
 import json
 import os
 import re
 import socket
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -452,6 +454,218 @@ def guess_field(name, label, ftype):
     return None
 
 
+# ---------------- transport opsional: httpx + HTTP/2 ----------------
+# Pola yang sama dengan stealth.ImpersonatedOpener: adaptor kecil yang
+# meniru interface urllib opener — open(req, timeout=...) mengembalikan
+# respons dengan read()/headers/status/geturl(), dan status error
+# di-raise sebagai urllib.error.HTTPError. Dengan begitu fetch(),
+# netlog, cache, cookies, dan retry di StaticEngine jalan tanpa
+# perubahan. httpx BUKAN dependency utama: bila tidak terinstal, engine
+# diam-diam memakai urllib seperti biasa (perilaku lama tidak berubah).
+
+def _httpx_importable():
+    """True bila `httpx` bisa diimpor.
+
+    Dicek secara lazy (bukan sekali di import-time) agar perilaku
+    fallback tetap benar walau modul di-install/di-copot di tengah jalan,
+    dan agar test bisa memalsukan sys.modules tanpa reload."""
+    try:
+        import httpx  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _h2_importable():
+    """True bila paket `h2` ada (syarat httpx mode HTTP/2)."""
+    try:
+        import h2  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+class _HttpxHeaders:
+    """Subset API email.message.Message di atas header httpx.
+
+    Yang dipakai fetch(): get / get_all("Set-Cookie") /
+    get_content_type / items. httpx otomatis men-decode body (gzip/br),
+    jadi Content-Encoding disembunyikan agar fetch() tidak men-decode dua
+    kali — pola yang sama dengan _CurlHeaders di stealth.py."""
+
+    def __init__(self, headers):
+        self._h = headers
+
+    def get(self, key, default=None):
+        if key.lower() == "content-encoding":
+            return default
+        try:
+            return self._h.get(key, default)
+        except Exception:
+            return default
+
+    def get_all(self, key, default=None):
+        try:
+            return list(self._h.get_list(key))
+        except AttributeError:
+            v = self.get(key)
+            return [v] if v is not None else []
+        except Exception:
+            return default if default is not None else []
+
+    def get_content_type(self):
+        ct = self.get("Content-Type", "") or ""
+        return ct.split(";")[0].strip()
+
+    def items(self):
+        try:
+            raw = list(self._h.items())
+        except Exception:
+            return []
+        return [(k, v) for k, v in raw if k.lower() != "content-encoding"]
+
+
+class _HttpxResponse:
+    """Interface respons ala-urllib di atas httpx.Response.
+
+    Mendukung read(n) bertahap (dipakai _perf_urllib/_dl_worker juga),
+    .status, .geturl(), .headers, .info() (protokol
+    CookieJar.extract_cookies), dan context manager."""
+
+    def __init__(self, resp):
+        self._r = resp
+        self._headers = _HttpxHeaders(resp.headers)
+        self._body = resp.content or b""
+        self._pos = 0
+
+    def read(self, n=-1):
+        if n is None or n < 0:
+            chunk = self._body[self._pos:]
+            self._pos = len(self._body)
+            return chunk
+        chunk = self._body[self._pos:self._pos + n]
+        self._pos += len(chunk)
+        return chunk
+
+    @property
+    def status(self):
+        return self._r.status_code
+
+    def geturl(self):
+        return str(self._r.url)
+
+    @property
+    def headers(self):
+        return self._headers
+
+    def info(self):
+        # protokol CookieJar.extract_cookies(response, request)
+        return self._headers
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            self._r.close()
+        except Exception:
+            pass
+        return False
+
+
+class _HttpxOpener:
+    """Adaptor transport httpx sebagai pengganti urllib opener.
+
+    open(req, timeout) -> _HttpxResponse; status 304 / >= 400 di-raise
+    sebagai urllib.error.HTTPError agar cabang cache/error di fetch()
+    berperilaku identik dengan jalur urllib.
+
+    - TLS: verify default httpx (True). TIDAK PERNAH verify=False.
+    - Proxy: hanya self.proxy yang dipakai (trust_env=False, seperti
+      jalur urllib yang tidak membaca env).
+    - Cookie dua arah dengan engine jar (best-effort tapi nyata): header
+      Cookie dihitung dari jar via CookieJar.add_cookie_header (logika
+      pencocokan domain/path/secure milik stdlib), lalu Set-Cookie dari
+      tiap hop redirect + respons final diserap kembali via
+      CookieJar.extract_cookies.
+    """
+
+    def __init__(self, jar, proxy=None, timeout=25, http2=True):
+        if not _httpx_importable():
+            raise RuntimeError("httpx tidak terinstal "
+                               "(pip install 'kancil[http2]')")
+        if http2 and not _h2_importable():
+            raise RuntimeError("paket 'h2' tidak terinstal "
+                               "(pip install 'kancil[http2]')")
+        import httpx as _httpx
+        self.jar = jar
+        self.proxy = proxy
+        self.timeout = timeout
+        self.mode = "http2" if http2 else "http1"
+        self._client = _httpx.Client(
+            http2=http2,
+            proxy=proxy,
+            timeout=timeout,
+            follow_redirects=True,
+            trust_env=False)
+        # verify sengaja tidak di-pass: default httpx True. Jangan diubah.
+
+    # -- sinkronisasi cookie: engine jar <-> request/response ------------
+    def _cookie_header_for(self, req):
+        """Bangun nilai header Cookie untuk req dari engine jar."""
+        try:
+            probe = urllib.request.Request(req.full_url, method="GET")
+            self.jar.add_cookie_header(probe)
+            return probe.get_header("Cookie")
+        except Exception:
+            return None
+
+    def _cookies_from_response(self, wrapped, url):
+        """Serap Set-Cookie satu respons ke engine jar (best-effort)."""
+        try:
+            dummy = urllib.request.Request(url, method="GET")
+            self.jar.extract_cookies(wrapped, dummy)
+        except Exception:
+            pass
+
+    # -- transport -------------------------------------------------------
+    def open(self, req, timeout=None):
+        if not req.get_header("Cookie"):
+            # pasang Cookie dari jar agar netlog fetch() (cookies_sent)
+            # mencatatnya seperti jalur urllib
+            cookie = self._cookie_header_for(req)
+            if cookie:
+                req.add_header("Cookie", cookie)
+        headers = dict(req.header_items())
+        try:
+            resp = self._client.request(
+                req.get_method(), req.full_url,
+                content=req.data, headers=headers,
+                timeout=timeout or self.timeout)
+        except Exception:
+            # kegagalan level koneksi dibiarkan naik agar cabang
+            # retry/backoff fetch() menanganinya (seperti URLError)
+            raise
+        # serap cookie dari tiap hop redirect + respons final
+        try:
+            chain = list(getattr(resp, "history", None) or []) + [resp]
+        except Exception:
+            chain = [resp]
+        for hop in chain:
+            try:
+                self._cookies_from_response(_HttpxResponse(hop), str(hop.url))
+            except Exception:
+                pass
+        wrapped = _HttpxResponse(resp)
+        if resp.status_code == 304 or resp.status_code >= 400:
+            # persis seperti urllib: fetch() punya cabang khusus
+            raise urllib.error.HTTPError(
+                req.full_url, resp.status_code,
+                "HTTP %d" % resp.status_code,
+                wrapped.headers, io.BytesIO(wrapped.read()))
+        return wrapped
+
+
 class StaticEngine:
     """Pure-Python engine. Honest capabilities: no JS/screenshot/real-storage."""
 
@@ -475,7 +689,7 @@ class StaticEngine:
 
     def __init__(self, cookie_file=None, user_agent=UA_DEFAULT,
                  timeout=25, retries=2, proxy=None, cache=True,
-                 impersonate=None):
+                 impersonate=None, http2=False):
         self.timeout = timeout
         self.retries = retries
         self.ua = user_agent or UA_DEFAULT
@@ -483,6 +697,9 @@ class StaticEngine:
         _install_dns_cache()
         self.proxy = proxy
         self.impersonate = impersonate  # None or a stealth.BROWSER_PROFILES key
+        # Minta transport httpx (+HTTP/2 bila paket 'h2' ada). Opsional:
+        # tanpa httpx, engine diam-diam memakai urllib (perilaku lama).
+        self.http2 = bool(http2)
         if (impersonate is not None
                 and impersonate in _stealth.BROWSER_PROFILES):
             self.ua = _stealth.BROWSER_PROFILES[impersonate]["ua"]
@@ -521,6 +738,28 @@ class StaticEngine:
                 return
             except (ValueError, RuntimeError):
                 pass
+        if self.http2 and _httpx_importable():
+            # Transport httpx opsional. Bila paket 'h2' hilang, httpx
+            # tetap dipakai tapi turun ke HTTP/1.1 dengan peringatan
+            # (bukan diam-diam). Bila httpx sendiri hilang, blok ini
+            # dilewati -> urllib seperti biasa (perilaku lama).
+            # impersonate (di atas) tetap menang bila aktif.
+            want_h2 = _h2_importable()
+            self.opener = _HttpxOpener(
+                self.jar, proxy=self.proxy, timeout=self.timeout,
+                http2=want_h2)
+            if not want_h2 and isinstance(getattr(self, "errors", None),
+                                          list):
+                # _build_opener() dipanggil dari __init__ sebelum
+                # self.errors (list) ada — saat itu self.errors masih
+                # method errors(); dalam kasus itu mode "http1" di
+                # opener + set_http2() sudah cukup sebagai penanda.
+                self.errors.append({
+                    "type": "http2",
+                    "error": "paket 'h2' tidak ditemukan; transport httpx "
+                             "berjalan HTTP/1.1 "
+                             "(pip install 'kancil[http2]' untuk HTTP/2)"})
+            return
         handlers = [urllib.request.HTTPCookieProcessor(self.jar)]
         if self.proxy:
             handlers.append(urllib.request.ProxyHandler(
@@ -555,6 +794,36 @@ class StaticEngine:
         self.proxy = url or None
         self._build_opener()
         return {"success": True, "proxy": self.proxy}
+
+    def set_http2(self, enabled):
+        """Aktif/nonaktifkan transport httpx (HTTP/2 bila paket 'h2' ada).
+
+        enabled=True meminta transport httpx; yang terjadi:
+        - httpx + h2 ada       -> transport httpx HTTP/2 aktif
+        - httpx ada, h2 hilang -> transport httpx HTTP/1.1 + peringatan
+        - httpx tidak ada      -> diam-diam tetap urllib (perilaku lama)
+        Bila impersonate (curl_cffi) aktif, ia tetap menang atas http2.
+
+        Butuh: pip install 'kancil[http2]'.
+        Mengembalikan {"success", "http2" (yang diminta), "active",
+        "mode" ("http2"/"http1"/"urllib"), "note"}."""
+        self.http2 = bool(enabled)
+        self._build_opener()
+        active = isinstance(self.opener, _HttpxOpener)
+        mode = self.opener.mode if active else "urllib"
+        note = None
+        if self.http2 and not active:
+            if self.impersonate and _stealth.HAVE_CURL_CFFI:
+                note = ("impersonate aktif; transport curl_cffi dipakai, "
+                        "http2 diabaikan")
+            else:
+                note = ("httpx tidak terinstal; memakai transport urllib "
+                        "(pip install 'kancil[http2]')")
+        elif active and mode == "http1":
+            note = ("paket 'h2' tidak ada; httpx berjalan HTTP/1.1 "
+                    "(pip install 'kancil[http2]' untuk HTTP/2)")
+        return {"success": True, "http2": self.http2, "active": active,
+                "mode": mode, "note": note}
 
     _CLEAR_WHATS = ("cookies", "tabs", "netlog", "cache")
 

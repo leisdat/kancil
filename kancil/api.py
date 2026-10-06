@@ -36,13 +36,14 @@ class Kancil:
                  pw_executable_path=None, cache=True,
                  webview_host=None, webview_port=None, dry_run=False,
                  impersonate=None, webview_auto_launch=True,
-                 confirm_destructive=True):
+                 confirm_destructive=True, http2=False):
         self.profile = profile or {}
         self.proxy = proxy
         self.ua = ua
         self.cache = cache
         self.dry_run = dry_run
         self.impersonate = impersonate  # static engine TLS impersonation profile
+        self.http2 = http2  # static engine: transport httpx+HTTP/2 opsional
         self.pw_session = pw_session
         self.pw_browser = pw_browser
         self.pw_executable_path = pw_executable_path
@@ -87,7 +88,8 @@ class Kancil:
                                     proxy=self.proxy,
                                     user_agent=self.ua or engines.UA_DEFAULT,
                                     cache=self.cache,
-                                    impersonate=self.impersonate)
+                                    impersonate=self.impersonate,
+                                    http2=self.http2)
 
     @property
     def capabilities(self):
@@ -1279,7 +1281,8 @@ class Kancil:
             def factory(base=base):
                 return StaticEngine(user_agent=base.ua, timeout=base.timeout,
                                     retries=0, proxy=base.proxy,
-                                    cache=base.cache_enabled)
+                                    cache=base.cache_enabled,
+                                    http2=getattr(base, "http2", False))
             res = scrape_url_list(
                 url_list, factory, selector=selector, fields=fields,
                 auto=auto, max_items=max_items, workers=workers,
@@ -2208,6 +2211,12 @@ class Kancil:
         "vault_delete": "{deleted}",
         "cookies_export_netscape": "{path, cookies}",
         "agent_key": "{action, key, path}",
+        "live_quake": "{count, quakes[{mag,place,dist_km,time_utc}]}",
+        "live_weather": "{temperature_c, humidity_pct, wind_kmh, weather}",
+        "live_flights": "{count, aircraft[{hex,flight,reg,type,lat,lon}]}",
+        "live_geocode": "{lat, lon, name, bbox}",
+        "live_launches": "{count, launches[{name,net,pad}]}",
+        "live_tle": "{count, tle[{name,line1,line2}]}",
         "form_fill_submit": "{filled, submitted, verified?}",
         "markdown": "{markdown, chars}",
         "network": "{requests[{id,t,method,url,status}]}",
@@ -2386,6 +2395,12 @@ class Kancil:
         "storage_delete": "delete storage key", "storage_get": "get storage key",
         "storage_set": "set storage key", "switch_tab": "switch tab",
         "view_stop": "stop live view",
+        "live_quake": "gempa M4.5+ 24 jam terakhir dalam radius (USGS)",
+        "live_weather": "cuaca saat ini (Open-Meteo)",
+        "live_flights": "pesawat ADS-B di sekitar titik (adsb.lol)",
+        "live_geocode": "geocoding nama tempat -> lat/lon (Photon)",
+        "live_launches": "jadwal peluncuran roket terdekat (Launch Library 2)",
+        "live_tle": "TLE satelit: CATNR tunggal atau satu grup (CelesTrak)",
     }
     _TOOL_PARAM_EXAMPLES = {
         "selector": "#submit", "url": "https://example.com",
@@ -2402,6 +2417,8 @@ class Kancil:
         "backend": "api", "verify": "#success",
         "expr": "!document.querySelector('.spinner')",
         "verify_text": "Pesanan diterima",
+        "lat": -6.2, "lon": 106.8, "radius_km": 100, "min_mag": 4.5,
+        "group": "stations",
     }
     _TOOL_STR_HINTS = {"selector", "url", "text", "query", "xpath", "js",
                        "expression", "path", "file", "key", "kind", "name",
@@ -2411,7 +2428,8 @@ class Kancil:
                        "backend", "verify", "expr", "verify_text"}
     _TOOL_INT_HINTS = {"ms", "id", "tab", "limit", "max_nodes", "fidx",
                        "did", "index", "n", "retries", "timeout",
-                       "max_tries", "timeout_ms", "poll_ms", "max_chars"}
+                       "max_tries", "timeout_ms", "poll_ms", "max_chars",
+                       "norad_id"}
     _TOOL_BOOL_HINTS = {"confirm", "idle", "full", "clear", "verbose"}
 
     @classmethod
@@ -2918,6 +2936,57 @@ class Kancil:
         _cl.clear(host)
         return {"success": True, "host": host or "all"}
 
+    # ---------- live public APIs (kancil/live.py: keyless, stdlib) ----------
+    def live_quake(self, lat, lon, radius_km=500, min_mag=4.5):
+        """Gempa M4.5+ 24 jam terakhir dalam radius_km (USGS, public domain)."""
+        from . import live as _live
+        try:
+            return _live.quake_near(float(lat), float(lon),
+                                    float(radius_km), float(min_mag))
+        except (TypeError, ValueError):
+            return fail("live_quake: lat/lon/radius_km/min_mag harus angka")
+
+    def live_weather(self, lat, lon):
+        """Cuaca saat ini (Open-Meteo; atribusi di field `attribution`)."""
+        from . import live as _live
+        try:
+            return _live.weather_now(float(lat), float(lon))
+        except (TypeError, ValueError):
+            return fail("live_weather: lat/lon harus angka")
+
+    def live_flights(self, lat, lon, radius_km=100):
+        """Pesawat ADS-B di sekitar titik (adsb.lol; radius_km -> NM)."""
+        from . import live as _live
+        try:
+            return _live.flights_near(float(lat), float(lon),
+                                      float(radius_km))
+        except (TypeError, ValueError):
+            return fail("live_flights: lat/lon/radius_km harus angka")
+
+    def live_geocode(self, q):
+        """Nama tempat -> lat/lon + bbox (Photon)."""
+        from . import live as _live
+        if not q:
+            return fail("live_geocode: q (nama tempat) wajib diisi")
+        return _live.geocode(str(q))
+
+    def live_launches(self, limit=5):
+        """Jadwal peluncuran roket terdekat (Launch Library 2)."""
+        from . import live as _live
+        try:
+            return _live.launches_upcoming(int(limit))
+        except (TypeError, ValueError):
+            return fail("live_launches: limit harus integer")
+
+    def live_tle(self, norad_id=None, group="stations"):
+        """TLE satelit (CelesTrak): CATNR tunggal atau satu grup."""
+        from . import live as _live
+        try:
+            nid = None if norad_id in (None, "") else int(norad_id)
+        except (TypeError, ValueError):
+            return fail("live_tle: norad_id harus integer")
+        return _live.sat_tle(nid, group or "stations")
+
     # ---------- autopilot (#3) ----------
     def run_plan(self, plan, checkpoint_path=None, resume=False,
                  variables=None):
@@ -3193,6 +3262,19 @@ Kancil._TOOL_ACTIONS = {
     "cookies_export_netscape": lambda s, p: s.cookies_export_netscape(
         p.get("path", "")),
     "agent_key": lambda s, p: s.agent_key(p.get("action", "show")),
+    # live public APIs (kancil/live.py — keyless, stdlib only)
+    "live_quake": lambda s, p: s.live_quake(
+        p.get("lat"), p.get("lon"),
+        radius_km=p.get("radius_km", 500),
+        min_mag=p.get("min_mag", 4.5)),
+    "live_weather": lambda s, p: s.live_weather(p.get("lat"), p.get("lon")),
+    "live_flights": lambda s, p: s.live_flights(
+        p.get("lat"), p.get("lon"), radius_km=p.get("radius_km", 100)),
+    "live_geocode": lambda s, p: s.live_geocode(p.get("q", "")),
+    "live_launches": lambda s, p: s.live_launches(
+        limit=int(p.get("limit", 5))),
+    "live_tle": lambda s, p: s.live_tle(norad_id=p.get("norad_id"),
+                                        group=p.get("group", "stations")),
     # forms + markdown
     "form_fill_submit": lambda s, p: s.form_fill_submit(
         int(p.get("id", 1)), values=p.get("values"), verify=p.get("verify"),

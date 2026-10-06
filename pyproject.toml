@@ -21,6 +21,12 @@ classifiers = [
 [project.scripts]
 kancil = "kancil.cli:main"
 
+[project.optional-dependencies]
+# Transport HTTP/2 opsional untuk static engine:
+#   pip install 'kancil[http2]'
+# Tanpa extra ini engine diam-diam memakai urllib (perilaku lama).
+http2 = ["httpx[http2]"]
+
 [project.urls]
 Homepage = "https://github.com/leisdat/kancil"
 
