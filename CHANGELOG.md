@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### Security (temuan audit eksternal 2026-10-06, sudah di-fix)
+- **Auth di viewer & agent bridge** (dulu: tanpa auth sama sekali —
+  halaman web asing bisa menyetir browser via `<img src>` ke 127.0.0.1
+  / CSRF lokal, dan membaca snapshot via DNS rebinding):
+  - Semua rute `/__kancil__/*` (viewer + proxy: `go`, `back`, `click`,
+    `type`, `agent/register|poll|result`, …) kini wajib token —
+    header `X-Kancil-Key` atau `?key=`. Pakai **key yang sama**
+    dengan agent server APK (`~/.kancil/agent.key`); satu key untuk
+    semua server lokal.
+  - Host header harus loopback (`127.0.0.1`/`localhost`/`::1`) —
+    request DNS rebinding (Host: domain penyerang) ditolak.
+    Origin/Referer asing juga ditolak.
+  - Shell viewer & gateway otomatis menyematkan token (link/form
+    `?key=`, fetch pakai header) — UX browser tidak berubah.
+    `agent.js` injeksi membawa `?key=` dari `<script src>` dan
+    meneruskannya ke `register`/`poll`/`result`.
+  - Kompatibilitas API/CLI dijaga: tidak ada rute yang dipindah ke
+    POST-only; klien lama cukup menambah header/`?key=`.
+  - 17 test baru (`tests/test_security.py`).
+- **CA key ditulis atomik 0600** (`proxy_server.ensure_ca`): dulu
+  `open(key, "w")` + `chmod` belakangan (jendela 0644 dengan umask
+  022); kini `os.open(O_CREAT|O_EXCL, 0o600)` + direktori `ca/` 0700
+  (termasuk jalur fallback openssl).
+- **Socket daemon 0600** eksplisit setelah bind (tidak bergantung umask).
+- **vision.locate_template**: template uniform (std≈0) kini ditolak
+  dengan pesan jelas — sebelumnya `TM_CCOEFF_NORMED` mengembalikan
+  skor 1.0 palsu di (0,0) (1 test gagal saat cv2 terinstal).
+- CI: job baru `test-opencv` (cabang cv2 tidak pernah teruji
+  sebelumnya); badge test 384.
+
 ### Added
 - **Agent API key auth** (APK agent 1.28, Python): agent server
   (127.0.0.1:8080) kini wajib header `X-Kancil-Key` di tiap request —

@@ -279,3 +279,18 @@ log yang ada.
 **`type()` di input framework modern (React/Vue).**
 Sudah pakai native value setter + event `input`/`change`. Kalau masih nggak
 nempel, pakai `kancil form fill` atau cek `kancil console` untuk error JS.
+## Keamanan
+
+Semua server HTTP lokal (`kancil view`, endpoint agent `serve-proxy`, dan
+agent server APK) wajib pakai agent key di tiap rute aksi:
+
+- Key ada di `~/.kancil/agent.key` (0600, dibuat otomatis). Satu key untuk
+  semua server lokal.
+- Kirim sebagai header `X-Kancil-Key: <key>` atau `?key=<key>`.
+- Shell viewer dan gateway menyematkannya otomatis — buka
+  `http://127.0.0.1:<port>/` di browser langsung jalan.
+- `curl` langsung butuh key: `curl -H "X-Kancil-Key: $(cat
+  ~/.kancil/agent.key)" http://127.0.0.1:PORT/__kancil__/back`.
+- Header Host harus loopback; `Origin`/`Referer` asing ditolak
+  (hardening DNS-rebinding + CSRF). Rotasi: `kancil agent-key
+  regenerate` (+ `sync` untuk app).

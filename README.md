@@ -312,6 +312,22 @@ phone's traffic through it.
 **Network log is request + headers only** (no response status/body — that
 needs full CDP/MITM). HAR export works from the existing log.
 
+## Security
+
+All local HTTP servers (`kancil view`, `serve-proxy` agent endpoints, and
+the APK agent server) require the agent key on every action route:
+
+- Key lives in `~/.kancil/agent.key` (0600, auto-generated). One key for
+  every local server.
+- Pass it as header `X-Kancil-Key: <key>` or `?key=<key>`.
+- The viewer shell and gateway embed it automatically — opening
+  `http://127.0.0.1:<port>/` in your browser just works.
+- Direct `curl` calls need it: `curl -H "X-Kancil-Key: $(cat
+  ~/.kancil/agent.key)" http://127.0.0.1:PORT/__kancil__/back`.
+- Host header must be loopback; foreign `Origin`/`Referer` rejected
+  (DNS-rebinding + CSRF hardening). Rotate with `kancil agent-key
+  regenerate` (+ `sync` for the app).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
