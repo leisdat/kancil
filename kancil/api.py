@@ -358,7 +358,8 @@ class Kancil:
                 return fail("no such element %s" % selector)
             node = el["node"]
         else:
-            m = self.engine.A11Y_REF_RE.match(selector or "")
+            a11y_re = getattr(self.engine, "A11Y_REF_RE", None)
+            m = a11y_re.match(selector or "") if a11y_re else None
             r = self.engine.resolve(selector)
             if not r.get("success"):
                 # Only blame the selector when it looks like CSS was intended;
@@ -369,7 +370,26 @@ class Kancil:
                         return fail("invalid selector %r: %s" % (selector, why),
                                     code="INVALID_INPUT")
                 return self._wrap(r)
-            node = r["node"]
+            node = r.get("node")
+            if node is None:
+                # webview engine: resolve() only reports count, no DOM node.
+                # Locate the node through the parsed page DOM instead.
+                from .dom import select as _sel
+                sel = selector
+                if selector.startswith("@"):
+                    # @refs map to CSS via the engine's a11y cache; dom.select
+                    # doesn't understand @ref syntax.
+                    cssmap = getattr(self.engine, "_a11y_css", {}) or {}
+                    css = cssmap.get(selector) or cssmap.get(selector[1:])
+                    if css:
+                        sel = css
+                try:
+                    nodes = _sel(p.dom, sel)
+                except Exception as e:
+                    return fail("bad selector: %s" % e, code="INVALID_INPUT")
+                if not nodes:
+                    return fail("no element matches %r" % selector)
+                node = nodes[0]
         d = inspect_element(node, p.dom)
         d["supported"] = {"computed_style": self.capabilities["computed_style"],
                           "bounding_box": self.capabilities["bounding_box"]}
@@ -3044,12 +3064,21 @@ class Kancil:
                 network_errors.append(e)
             elif t == "console.error":
                 console_errors.append(e)
+        if hasattr(eng, "tabs"):
+            tab_count = len(eng.tabs)
+        elif hasattr(eng, "list_tabs"):
+            try:
+                tab_count = len(eng.list_tabs())
+            except Exception:
+                tab_count = 0
+        else:
+            tab_count = 0
         return ok(console_errors=console_errors[-20:],
                   console_warnings=console_warnings[-20:],
                   network_errors=network_errors[-20:],
                   page_errors=page_errors[-20:],
                   performance={"uptime_s": int(time.time() - self._start_t),
-                               "tabs": len(eng.tabs),
+                               "tabs": tab_count,
                                "requests": len(eng.netlog)})
 
 

@@ -59,6 +59,7 @@ class WebViewEngine:
         self.auto_launch = bool(kwargs.get("auto_launch", True))
         self._healing = False  # re-entrancy guard for ensure_alive/_req
         self._hist = {}  # tab_id -> {"history": [], "pos": -1}
+        self._last_touch_xy = None  # (x, y) CSS px dari touch terakhir
         self._a11y_refs = {}
         self._a11y_sig = None
         self._a11y_pending = ({}, None)
@@ -82,13 +83,16 @@ class WebViewEngine:
         if st is None and self.auto_launch:
             if self.ensure_alive().get("success"):
                 st = self._status_or_none()
-                if st is not None:
-                    self.cur = st.get("tab", 0)
         if st is None:
             raise EngineError(
                 "webview agent unreachable at %s — open the Kancil Browser "
                 "app on this phone first (auto-launch %s)" %
                 (self.base, "tried" if self.auto_launch else "disabled"))
+        # Adopt the app's active tab on every fresh engine. Android
+        # persists tab ids across app restarts; our default cur=0 is
+        # rarely the real tab and actions would silently hit another tab.
+        if isinstance(st, dict) and st.get("tab") is not None:
+            self.cur = int(st["tab"])
 
     # ---------- transport ----------
 
@@ -298,11 +302,13 @@ class WebViewEngine:
     def back(self):
         self._get("/back")
         self._invalidate()
+        time.sleep(0.5)  # let navigation settle before reading status
         return {"success": True, "url": self._cur_url()}
 
     def forward(self):
         self._get("/forward")
         self._invalidate()
+        time.sleep(0.5)
         return {"success": True, "url": self._cur_url()}
 
     def reload(self):
@@ -388,14 +394,33 @@ class WebViewEngine:
         url = self._cur_url()
         if self._page_cache is not None and self._page_url == url:
             return self._page_cache
-        try:
-            r = self._get("/dom")
-            html = r.get("html") or "" if isinstance(r, dict) else ""
-        except Exception:
+        # Zombie WebView: /dom and evaluate() may both return "null" for
+        # a while after the app sits idle. Retry a couple of times before
+        # giving up, and NEVER cache an empty/null page — the next access
+        # must re-fetch instead of serving a blank snapshot.
+        html = ""
+        for _ in range(3):
             html = ""
-        p = engines.Page(url, 200, html.encode("utf-8", "replace"),
-                         "text/html")
-        self._page_cache = p
+            try:
+                r = self._get("/dom")
+                got = r.get("html") or "" if isinstance(r, dict) else ""
+                if got and got.strip() and got != "null":
+                    html = got
+            except Exception:
+                pass
+            if not html.strip() or html == "null":
+                try:
+                    r = self.evaluate("document.documentElement.outerHTML")
+                    html = r.get("result") or "" if isinstance(r, dict) else ""
+                except Exception:
+                    html = ""
+            if html.strip() and html != "null":
+                break
+            time.sleep(0.6)  # beat to let the app recover
+        good = bool(html.strip()) and html != "null"
+        raw = html.encode("utf-8", "replace") if good else b""
+        p = engines.Page(url, 200, raw, "text/html")
+        self._page_cache = p if good else None  # don't cache blank
         self._page_url = url
         return p
 
@@ -1422,6 +1447,11 @@ class WebViewEngine:
                     120 if action == "pinch_in" else 420,
                 ) if distance_start is None else (
                     "pinch", distance_start, distance_end)
+            if action == "up" and (x is None or y is None) \
+                    and getattr(self, "_last_touch_xy", None):
+                # 'up' closes a drag stream; x/y are optional in the
+                # agent API but the APK requires them. Reuse last coords.
+                x, y = self._last_touch_xy
             if selector and (x is None or y is None):
                 # standard targeting (CSS/XPath/@ref/text, pierces shadow
                 # DOM) -> element center. Note: rect is in the element's
@@ -1460,6 +1490,10 @@ class WebViewEngine:
                 body["human"] = True
             r = self._post("/touch", body)
             if isinstance(r, dict) and r.get("ok"):
+                self._last_touch_xy = (r.get("x") if r.get("x") is not None
+                                       else x,
+                                       r.get("y") if r.get("y") is not None
+                                       else y)
                 return {"success": True, "action": r.get("action", action),
                         "x": r.get("x"), "y": r.get("y")}
             return {"success": False, "errors": [str(r)[:200]]}

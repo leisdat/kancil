@@ -36,6 +36,13 @@ class FakeEngine:
         self.evals.append(js)
         if "innerWidth" in js:
             return {"w": self.vw, "h": self.vh}
+        if "document.readyState" in js:
+            return "complete"
+        if "document.querySelector" in js and "indexOf" in js:
+            # verify text= pattern: kompatibel dengan FakeEngine
+            return "ok" if (self.verify_results and self.verify_results.pop(0) == "ok") else "missing"
+        if "document.querySelectorAll(" in js and ".length" in js:
+            return self.verify_results.pop(0) if self.verify_results else 0
         if "document.querySelector" in js:
             return bool(self.verify_results and self.verify_results.pop(0))
         if "elementFromPoint" in js:
@@ -322,6 +329,89 @@ class SeeTapTest(unittest.TestCase):
         self.assertEqual(t["action"], "swipe")
         self.assertEqual((t["x"], t["y"]), (40.0, 400.0))
         self.assertEqual((t["x2"], t["y2"]), (360.0, 400.0))
+
+
+class ReadyAndVerifyTest(unittest.TestCase):
+    """_ready guard + verify text=/count= patterns (regression for live
+    findings: see_* against half-rendered pages / existence-only verify)."""
+
+    def test_ready_waits_complete(self):
+        from kancil import vision as v
+        e = FakeEngine()
+
+        # readyState muantain 'loading' lalu 'complete'
+        states = iter(["loading", "loading", "complete"])
+        orig_ev = e.evaluate
+
+        def ev(js):
+            if "document.readyState" in js:
+                return next(states)
+            return orig_ev(js)
+
+        e.evaluate = ev
+        r = v._ready(e, timeout=5)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["ready"], "complete")
+
+    def test_ready_timeout_reports_stage(self):
+        from kancil import vision as v
+        e = FakeEngine()
+
+        def ev(js):
+            if "document.readyState" in js:
+                return "loading"
+            return "x"
+
+        e.evaluate = ev
+        r = v._ready(e, timeout=0.3)
+        self.assertFalse(r["success"])
+        self.assertEqual(r["stage"], "ready")
+        self.assertIn("loading", r["error"])
+
+    def test_see_tap_blocks_while_loading(self):
+        from kancil import vision as v
+        e = FakeEngine()
+
+        def ev(js):
+            if "document.readyState" in js:
+                return "loading"
+            return "x"
+
+        e.evaluate = ev
+        r = v.see_tap(e, "tombol", backend="callback",
+                      callback=lambda p, d: (500, 250), verify="#ok")
+        self.assertFalse(r["success"])
+        self.assertEqual(r["stage"], "ready")
+        self.assertEqual(e.touches, [])  # gak boleh tap
+
+    def test_verify_text_state(self):
+        from kancil import vision as v
+        e = FakeEngine()
+        e.verify_results = ["ok"]
+        ok, info = v._verify_ok(e, "#out text=CLICKED")
+        self.assertTrue(ok)
+        e.verify_results = ["missing"]
+        ok, info = v._verify_ok(e, "#out text=CLICKED")
+        self.assertFalse(ok)
+        self.assertIn("missing", str(info))
+
+    def test_verify_count(self):
+        from kancil import vision as v
+        e = FakeEngine()
+        e.verify_results = [2]
+        ok, info = v._verify_ok(e, "a count=2")
+        self.assertTrue(ok)
+        e.verify_results = [1]
+        ok, info = v._verify_ok(e, "a count=2")
+        self.assertFalse(ok)
+
+    def test_verify_default_existence(self):
+        from kancil import vision as v
+        e = FakeEngine()
+        e.verify_results = [True]
+        ok, info = v._verify_ok(e, "#ok")
+        self.assertTrue(ok)
+        self.assertEqual(info, "found")
 
 
 class VisionApiWiringTest(unittest.TestCase):

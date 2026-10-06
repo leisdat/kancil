@@ -419,6 +419,39 @@ def grab_png(engine, full=False):
             pass
 
 
+def _ready(engine, timeout=10.0):
+    """Wait until the page is fully rendered (readyState == 'complete').
+
+    Screenshot during loading shows a half-rendered frame; vision locate
+    against a stale frame silently taps the wrong element. Call right
+    before grab_png in every see_* entry point.
+
+    Engines without evaluate() (e.g. static) skip the check — they have
+    no meaningful loading state.
+    """
+    ev = getattr(engine, "evaluate", None)
+    if not ev:
+        return {"success": True}
+    import time as _t
+    deadline = _t.time() + timeout
+    last = ""
+    while _t.time() < deadline:
+        try:
+            r = ev("document.readyState")
+            if isinstance(r, dict):
+                r = r.get("result", r.get("value", r))
+            last = str(r or "")
+            if last == "complete":
+                return {"success": True, "ready": "complete"}
+        except Exception:
+            pass
+        _t.sleep(0.3)
+    return {"success": False, "stage": "ready", "ready": last,
+            "error": "page belum complete (readyState='%s') setelah %ss — "
+                     "screenshot bakal setengah render; panggil "
+                     "open(..., idle=True) / wait() dulu" % (last, timeout)}
+
+
 def viewport_css(engine):
     """(lebar, tinggi) viewport dalam CSS px via JS."""
     ev = getattr(engine, "evaluate", None)
@@ -494,14 +527,54 @@ return 'typed:'+((inp.value||inp.textContent||'').length);})()"""
 
 
 def _verify_ok(engine, verify):
-    """verify: selector CSS yang harus ada setelah aksi (atau None)."""
+    """verify: CSS selector yang harus ada setelah aksi (atau None).
+
+    Pola (string tunggal):
+      "#sel"                 -> selector harus ada di DOM
+      "text=some text"       -> ada elemen dengan teks mengandung "some text"
+                                (default: teks APAPUN di '#sel' — lihat bawah)
+      "#sel text=X"          -> #sel ada, dan teksnya mengandung X
+      "#sel count=N"         -> #sel ada, dan jumlah elemen == N
+      "anything"             -> selain itu tetap dianggap CSS selector
+    """
     if not verify:
         return True, "skipped"
     ev = getattr(engine, "evaluate", None)
     if not ev:
         return True, "no-evaluate"
+    # split "… text=…" dan "… count=…"
+    import re as _re
+    m = _re.match(r"^(.+?)\s+text=(.*)$", verify)
+    sel, want_text = (m.group(1), m.group(2)) if m else (verify, None)
+    m2 = _re.match(r"^(.+?)\s+count=(-?\d+)$", sel)
+    sel, want_count = (m2.group(1), int(m2.group(2))) if m2 else (sel, None)
+    if sel.startswith("text="):
+        # cari teks apapun di seluruh doc
+        want_text = sel[len("text="):]
+        sel = "body"
     try:
-        r = ev("!!document.querySelector(%s)" % json.dumps(verify))
+        if want_text is not None:
+            q = json.dumps(sel)
+            js = ("(function(){var el=document.querySelector(%s);"
+                  "if(!el)return 'sel-missing';"
+                  "var t=(el.innerText||el.textContent||'').trim();"
+                  "return t.indexOf(%s)>=0?'ok':'missing';})()"
+                  % (q, json.dumps(want_text)))
+            r = ev(js)
+            if isinstance(r, dict):
+                r = r.get("result", r.get("value", r))
+            ok = r == "ok"
+            return ok, "found" if ok else ("missing", "state", "text",
+                                           want_text, "sel", sel)
+        if want_count is not None:
+            q = json.dumps(sel)
+            r = ev("document.querySelectorAll(%s).length" % q)
+            if isinstance(r, dict):
+                r = r.get("result", r.get("value", r))
+            ok = (r is not None and int(r) == want_count)
+            return ok, ("found" if ok else "count-mismatch %s!=%s"
+                        % (r, want_count))
+        r = ev("!!document.querySelector(%s)" % json.dumps(sel))
         if isinstance(r, dict):
             r = r.get("result", r.get("value", False))
         found = r is True or r == "true"
@@ -524,6 +597,9 @@ def see_tap(engine, description, backend=None, template=None,
                          "eksekusi)",
                 "planned": {"action": "tap", "description": description,
                             "backend": backend or "auto"}}
+    rd = _ready(engine)
+    if not rd["success"]:
+        return rd
     g = grab_png(engine)
     if not g["success"]:
         return dict(g, stage="screenshot")
@@ -571,6 +647,9 @@ def see_type(engine, description, text, backend=None, template=None,
                 "error": "dry-run: type diblokir",
                 "planned": {"action": "type", "description": description,
                             "text_len": len(text)}}
+    rd = _ready(engine)
+    if not rd["success"]:
+        return rd
     g = grab_png(engine)
     if not g["success"]:
         return dict(g, stage="screenshot")
@@ -616,6 +695,9 @@ def see_drag(engine, from_desc, to_desc, backend=None, template=None,
         return {"success": False, "code": "DRY_RUN_BLOCKED",
                 "error": "dry-run: drag diblokir",
                 "planned": {"action": "drag", "from": from_desc, "to": to_desc}}
+    rd = _ready(engine)
+    if not rd["success"]:
+        return rd
     g = grab_png(engine)
     if not g["success"]:
         return dict(g, stage="screenshot")
