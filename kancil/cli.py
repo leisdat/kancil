@@ -446,6 +446,9 @@ def build_parser():
                     help="validate actions/params without executing (dry run)")
     sr.add_argument("--continue-on-error", action="store_true",
                     help="don't stop at the first failed step")
+    sr.add_argument("--var", action="append", default=[],
+                    metavar="k=v",
+                    help="variable substitution: {{k}} -> v (repeatable)")
 
     va = SP("vault", help="encrypted session vault (AES-256-CBC + HMAC, "
                           "PBKDF2; password via KANCIL_VAULT_PASSWORD or prompt)")
@@ -453,6 +456,30 @@ def build_parser():
     va.add_argument("name", nargs="?", default="default")
     va.add_argument("--restore", action="store_true",
                     help="load: session_import langsung kalau data sesi")
+
+    ap = SP("autopilot", help="jalankan rencana browsing multi-step "
+                              "otonom (watchdog + stuck detector otomatis)")
+    ap.add_argument("plan", help="plan JSON (lihat kancil/autopilot.py)")
+    ap.add_argument("--resume", action="store_true",
+                    help="lanjutkan dari checkpoint terakhir")
+    ap.add_argument("--checkpoint", default=None,
+                    help="path file checkpoint (default: <plan>.checkpoint.json)")
+    ap.add_argument("--vault", default=None,
+                    help="auto-restore sesi dari vault saat start")
+    ap.add_argument("--var", action="append", default=[], metavar="k=v",
+                    help="substitusi {{k}} di params (repeatable)")
+
+    su = SP("scroll-until", help="scroll sampai teks/selector ketemu "
+                                 "(feed infinite)")
+    su.add_argument("target", help="teks yang dicari")
+    su.add_argument("--selector", action="store_true",
+                    help="target adalah CSS selector, bukan teks")
+    su.add_argument("--max", type=int, default=12, dest="max_scrolls")
+    su.add_argument("--pixels", type=int, default=600)
+
+    he = SP("health", help="cek responsivitas tab (zombie watchdog)")
+    he.add_argument("--recover", action="store_true",
+                    help="pulihkan otomatis bila zombie terdeteksi")
 
     ha = SP("har", help="HAR recording session")
     ha.add_argument("action", choices=["start", "stop", "export", "clear", "stats"])
@@ -976,8 +1003,14 @@ def dispatch(b, args):
                                    domain=getattr(args, "domain", None))
         return b.session_list()
     if c == "session-replay":
+        variables = {}
+        for kv in args.var:
+            if "=" in kv:
+                k, v = kv.split("=", 1)
+                variables[k] = v
         return b.session_replay(args.path, dry_run=args.check,
-                                stop_on_error=not args.continue_on_error)
+                                stop_on_error=not args.continue_on_error,
+                                variables=variables or None)
     if c == "vault":
         import os as _os
         pw = _os.environ.get("KANCIL_VAULT_PASSWORD")
@@ -993,6 +1026,36 @@ def dispatch(b, args):
         if args.action == "list":
             return b.vault_list()
         return b.vault_delete(args.name)
+    if c == "autopilot":
+        from . import autopilot as _ap
+        variables = {}
+        for kv in args.var:
+            if "=" in kv:
+                k, v = kv.split("=", 1)
+                variables[k] = v
+        try:
+            plan = _ap.load_plan(args.plan)
+        except (OSError, ValueError) as e:
+            return {"success": False, "errors": ["plan: %s" % str(e)[:200]]}
+        if args.vault:
+            plan["vault"] = args.vault
+        return b.run_plan(plan, checkpoint_path=args.checkpoint,
+                          resume=args.resume,
+                          variables=variables or None)
+    if c == "scroll-until":
+        if args.selector:
+            return b.scroll_until(selector=args.target,
+                                  max_scrolls=args.max_scrolls,
+                                  pixels=args.pixels)
+        return b.scroll_until(text=args.target,
+                              max_scrolls=args.max_scrolls,
+                              pixels=args.pixels)
+    if c == "health":
+        from . import watchdog as _wd
+        c = _wd.check(b)
+        if args.recover and c.get("zombie_suspect"):
+            c["recovery"] = _wd.recover(b)
+        return c
     if c == "har":
         if args.action == "start":
             return b.har_start()

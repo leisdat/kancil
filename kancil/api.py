@@ -59,6 +59,7 @@ class Kancil:
         self._snap_history = []  # 2 snapshot terakhir (untuk snapshot_diff)
         self._recording = None  # {"path":..., "fh":...} saat merekam sesi
         self._confirm_destructive = confirm_destructive
+        self._null_streak = 0  # watchdog: streak probe "1+1" -> null
 
     def _make_engine(self, name, timeout, retries, cookie_file):
         if name == "playwright":
@@ -170,13 +171,61 @@ class Kancil:
 
     # ---------- navigation ----------
     @_with_delta
-    def open(self, url, idle=False, idle_timeout=15, verify=None):
+    def open(self, url, idle=False, idle_timeout=15, verify=None,
+             settle=False, settle_timeout=15):
         if self._engine_name == "webview":
             r = self.engine.open(url, idle=idle, idle_timeout=idle_timeout,
                                  verify=verify)
         else:
             r = self.engine.open(url)
-        return self._wrap(r)
+        r = self._wrap(r)
+        if settle and r.get("success"):
+            s = self.wait_settled(timeout=settle_timeout)
+            r["settled"] = s.get("success")
+            if not s.get("success"):
+                r["settle_errors"] = s.get("errors")
+        return r
+
+    def wait_settled(self, timeout=15, quiet_ms=1000):
+        """Tunggu halaman settle seperti manusia: document complete +
+        network quiet (quiet_ms) + DOM stabil (ukuran DOM tidak berubah
+        di 2 sampel). Satu panggilan, tanpa tebak-tebak sleep.
+
+        Untuk static engine: selalu settled (complete setelah load).
+        """
+        if self._engine_name == "static":
+            return {"success": True, "settled": True,
+                    "note": "static engine: DOM complete setelah load"}
+        if self._engine_name == "webview":
+            w = self.wait_idle(timeout=timeout, quiet_ms=quiet_ms)
+            if not w.get("success"):
+                return w
+            # DOM stabil? sampel panjang HTML 2x selisih 600ms
+            import time as _t
+            l1 = self._dom_length()
+            _t.sleep(0.6)
+            l2 = self._dom_length()
+            stable = l1 is not None and l2 is not None and abs(l2 - l1) < 200
+            return {"success": True, "settled": True,
+                    "idle": w.get("idle"), "dom_stable": stable,
+                    "dom_bytes": l2}
+        # playwright / lainnya: coba wait_idle engine bila ada
+        fn = getattr(self.engine, "wait_idle", None)
+        if callable(fn):
+            return self._wrap(fn(timeout=timeout, quiet_ms=quiet_ms))
+        return {"success": True, "settled": True,
+                "note": "engine %s: tanpa wait_idle, dianggap settled"
+                        % self._engine_name}
+
+    def _dom_length(self):
+        try:
+            r = self.engine.evaluate(
+                "(function(){return document.documentElement ? "
+                "document.documentElement.outerHTML.length : -1})()")
+            v = (r or {}).get("result")
+            return int(v) if v is not None else None
+        except Exception:
+            return None
 
     @_with_delta
     def back(self, verify=None, verify_text=None):
@@ -447,9 +496,102 @@ class Kancil:
                                    verify=verify))
         return self._wrap(self.engine.scroll(target))
 
+    def _page_has(self, text=None, selector=None):
+        """Cek cepat: teks/selector ada di halaman? (lintas engine)."""
+        import json as _json
+        try:
+            if self._engine_name == "static":
+                pg = self.engine.page
+                if text:
+                    return text in (getattr(pg, "text", "") or "")
+                if selector and getattr(pg, "dom", None):
+                    from .dom import select as _sel
+                    return len(_sel(pg.dom, selector)) > 0
+                return False
+            # webview / playwright: via JS
+            if text:
+                r = self.engine.evaluate(
+                    "(function(){return document.body.innerText.includes(%s)"
+                    "})()" % _json.dumps(text))
+                if r.get("success") and str(r.get("result")) == "true":
+                    return True
+            if selector:
+                r = self.engine.evaluate(
+                    "(function(){try{return document.querySelectorAll(%s)"
+                    ".length}catch(e){return 0}})()" % _json.dumps(selector))
+                try:
+                    if int(r.get("result") or 0) > 0:
+                        return True
+                except (TypeError, ValueError):
+                    pass
+        except Exception:
+            pass
+        return False
+
+    def scroll_until(self, text=None, selector=None, max_scrolls=12,
+                     pause_ms=800, pixels=600):
+        """Scroll sampai teks/selector ketemu — untuk feed infinite.
+
+        Berhenti bila: ketemu, max_scrolls tercapai, atau scroll tidak
+        lagi menggerakkan halaman (delta 0 = konten habis).
+        """
+        if not text and not selector:
+            return {"success": False,
+                    "errors": ["butuh text= atau selector="]}
+        scrolls = 0
+        for _ in range(max_scrolls):
+            if self._page_has(text=text, selector=selector):
+                return {"success": True, "found": True, "scrolls": scrolls,
+                        "by": "text" if text else "selector"}
+            r = self.scroll(pixels, settle_ms=pause_ms)
+            if not r.get("success"):
+                return {"success": False, "found": False,
+                        "scrolls": scrolls,
+                        "errors": r.get("errors") or ["scroll gagal"]}
+            scrolls += 1
+            if r.get("delta", 1) == 0:
+                break  # konten habis — cek terakhir di bawah
+        found = self._page_has(text=text, selector=selector)
+        return {"success": True, "found": found, "scrolls": scrolls,
+                "by": "text" if text else "selector",
+                "exhausted": not found}
+
     # ---------- js / wait / console ----------
     def evaluate(self, js):
-        return self._wrap(self.engine.evaluate(js))
+        r = self._wrap(self.engine.evaluate(js))
+        # watchdog: lacak null-streak — probe konstan yang null adalah
+        # tanda zombie tab (webview). Hanya hitung saat success tapi
+        # result None; ekspresi user yang legitimate-null tidak dihitung
+        # di sini (probe pakai "1+1" yang tak mungkin null).
+        if r.get("success"):
+            if r.get("result") is None and js.strip() == "1+1":
+                self._null_streak += 1
+            elif r.get("result") is not None:
+                self._null_streak = 0
+        return r
+
+    # ---------- watchdog (#1) ----------
+    def health_check(self):
+        """Cek responsivitas tab: probe JS + null-streak + info tab."""
+        from . import watchdog as _wd
+        return _wd.check(self)
+
+    def recover_zombie(self, verify=None):
+        """Pulihkan zombie tab: tutup tab, buka URL ulang di tab baru."""
+        from . import watchdog as _wd
+        return _wd.recover(self, verify=verify)
+
+    # ---------- stuck detector (#4) ----------
+    def check_stuck(self):
+        """Deteksi halaman penghenti autopilot: captcha/login/consent/dll."""
+        from . import stuck as _st
+        return _st.check(self)
+
+    def resolve_stuck(self, kind=None):
+        """Selesaikan stuck: consent di-auto-klik; captcha/login/paywall
+        dilaporkan (needs_human=True) — tidak ditebak."""
+        from . import stuck as _st
+        return _st.resolve(self, kind=kind)
 
     def wait(self, selector=None, ms=None, text=None):
         return self._wrap(self.engine.wait(selector=selector, ms=ms, text=text))
@@ -2022,8 +2164,16 @@ class Kancil:
         "select": "{selected, delta?}", "check": "{checked, delta?}",
         "uncheck": "{unchecked, delta?}", "hover": "{hovered, delta?}",
         "focus": "{focused, delta?}", "scroll": "{scrolled, delta?}",
+        "scroll_until": "{found, scrolls}",
         "evaluate": "{result}", "wait": "{found, waited_ms}",
         "wait_for": "{matches, waited_ms, value}",
+        "wait_settled": "{settled, dom_stable}",
+        "health_check": "{responsive, zombie_suspect}",
+        "recover_zombie": "{recovered, url}",
+        "check_stuck": "{stuck, kinds[]}",
+        "resolve_stuck": "{resolved, needs_human}",
+        "run_plan": "{steps_ran, failed[]}",
+        "vault_restore": "{data, restored}",
         "session_export": "{path, cookie_origins, storage_origins}",
         "session_import": "{cookies_loaded, storage_injected[]}",
         "session_record_start": "{path}",
@@ -2567,17 +2717,25 @@ class Kancil:
         self._recording = None
         return {"success": True, "path": rec["path"]}
 
-    def session_replay(self, path, dry_run=False, stop_on_error=True):
+    def session_replay(self, path, dry_run=False, stop_on_error=True,
+                       variables=None):
         """Putar ulang rekaman sesi (JSONL dari session_record_start).
 
         dry_run=True: hanya validasi action+param tanpa eksekusi.
         stop_on_error=False: lanjut walau ada langkah gagal.
+        variables: {"nama": "nilai"} — substitusi {{nama}} di semua
+            string params (rekam sekali, replay dengan input beda).
         """
         import json as _json
         import os as _os
+        from .autopilot import substitute_variables as _sub_vars
         if not _os.path.exists(path):
             return {"success": False,
                     "errors": ["file not found: %s" % path]}
+
+        def _sub(o):
+            return _sub_vars(o, variables)
+
         steps = []
         try:
             with open(path) as f:
@@ -2595,7 +2753,7 @@ class Kancil:
         ran, failed = 0, []
         for st in steps:
             action = st.get("action", "")
-            params = st.get("params", {}) or {}
+            params = _sub(st.get("params", {}) or {})
             payload = {"action": action}
             payload.update(params)
             if dry_run:
@@ -2611,6 +2769,7 @@ class Kancil:
                     break
         return {"success": not failed, "ran": ran,
                 "failed": failed, "dry_run": dry_run,
+                "variables": variables or {},
                 "errors": ["%d step(s) failed" % len(failed)] if failed
                           else []}
 
@@ -2711,6 +2870,27 @@ class Kancil:
             return {"success": False,
                     "errors": ["no vault entry %r" % name]}
         return {"success": True, "deleted": name}
+
+    def restore_vault(self, name, password=None):
+        """Auto-restore sesi dari vault: decrypt + session_import (#6).
+
+        Dipakai autopilot saat start agar login tidak hilang.
+        """
+        return self.vault_load(name, password=password, restore=True)
+
+    # ---------- autopilot (#3) ----------
+    def run_plan(self, plan, checkpoint_path=None, resume=False,
+                 variables=None):
+        """Jalankan plan autopilot (dict, lihat kancil/autopilot.py).
+
+        Watchdog + stuck detector jalan otomatis tiap step; checkpoint
+        tersimpan tiap step untuk resume.
+        """
+        from . import autopilot as _ap
+        if isinstance(plan, str):
+            plan = _ap.load_plan(plan)
+        return _ap.run(self, plan, checkpoint_path=checkpoint_path,
+                       resume=resume, variables=variables)
 
     # ---------- snapshot ----------
     def snapshot(self, full=False, dom=False, a11y=True, links=True, forms=True,
@@ -2878,7 +3058,9 @@ Kancil._TOOL_ACTIONS = {
     # navigation
     "open": lambda s, p: s.open(p.get("url", ""),
                         idle=p.get("idle", False),
-                        verify=p.get("verify")),
+                        verify=p.get("verify"),
+                        settle=bool(p.get("settle")),
+                        settle_timeout=int(p.get("settle_timeout", 15))),
     "back": lambda s, p: s.back(verify=p.get("verify"),
                                verify_text=p.get("verify_text")),
     "forward": lambda s, p: s.forward(verify=p.get("verify"),
@@ -2912,6 +3094,11 @@ Kancil._TOOL_ACTIONS = {
     "hover": lambda s, p: s.hover(p.get("selector", "")),
     "focus": lambda s, p: s.focus(p.get("selector", "")),
     "scroll": lambda s, p: s.scroll(p.get("target", "bottom")),
+    "scroll_until": lambda s, p: s.scroll_until(
+        text=p.get("text"), selector=p.get("selector"),
+        max_scrolls=int(p.get("max_scrolls", 12)),
+        pause_ms=int(p.get("pause_ms", 800)),
+        pixels=int(p.get("pixels", 600))),
     # js / wait
     "evaluate": lambda s, p: s.evaluate(p.get("js", p.get("expression", ""))),
     "wait": lambda s, p: s.wait(selector=p.get("selector"),
@@ -2919,6 +3106,17 @@ Kancil._TOOL_ACTIONS = {
     "wait_for": lambda s, p: s.wait_for(
         p.get("expr", ""), timeout_ms=int(p.get("timeout_ms", 10000)),
         poll_ms=int(p.get("poll_ms", 300))),
+    "wait_settled": lambda s, p: s.wait_settled(
+        timeout=int(p.get("timeout", 15)),
+        quiet_ms=int(p.get("quiet_ms", 1000))),
+    # watchdog + stuck detector (autopilot)
+    "health_check": lambda s, p: s.health_check(),
+    "recover_zombie": lambda s, p: s.recover_zombie(
+        verify=p.get("verify")),
+    "check_stuck": lambda s, p: s.check_stuck(),
+    "resolve_stuck": lambda s, p: s.resolve_stuck(kind=p.get("kind")),
+    "run_plan": lambda s, p: s.run_plan(
+        p.get("plan") or p.get("path", ""), variables=p.get("variables")),
     # session persist (agent 1.27+)
     "session_export": lambda s, p: s.session_export(p.get("path", "")),
     "session_import": lambda s, p: s.session_import(p.get("path", "")),
@@ -2927,10 +3125,13 @@ Kancil._TOOL_ACTIONS = {
     "session_record_stop": lambda s, p: s.session_record_stop(),
     "session_replay": lambda s, p: s.session_replay(
         p.get("path", ""), dry_run=bool(p.get("dry_run")),
-        stop_on_error=p.get("stop_on_error", True)),
+        stop_on_error=p.get("stop_on_error", True),
+        variables=p.get("variables")),
     "vault_save": lambda s, p: s.vault_save(
         p.get("name", "default"), data=p.get("data"),
         password=p.get("password")),
+    "vault_restore": lambda s, p: s.restore_vault(
+        p.get("name", "default"), password=p.get("password")),
     "vault_load": lambda s, p: s.vault_load(
         p.get("name", "default"), password=p.get("password"),
         restore=bool(p.get("restore"))),

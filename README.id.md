@@ -235,6 +235,21 @@ JavaScript, dan network log per tab — tanpa perlu agent. Tombol fullscreen vid
 >
 > **Network + body**: `kancil network --with-bodies` — tiap entri log
 > ditempeli `has_body` + preview body 300 karakter.
+>
+> **Autopilot** (biar agent bisa selancar sendiri dengan nyaman):
+> `kancil health` — watchdog zombie-tab (probe JS konstan; null-streak =
+> zombie), `--recover` buat pulihkan otomatis (tutup tab mati, buka URL
+> ulang). `open(settle=True)` / `wait_settled()` — tunggu document
+> complete + network quiet + DOM stabil, bunuh race evaluate-setelah-navigate.
+> `kancil autopilot plan.json` — plan multi-step: verify per step,
+> retry + backoff, screenshot tiap gagal, checkpoint + `--resume`,
+> substitusi `{{var}}` (`--var k=v`), `vault:` buat auto-restore sesi.
+> Watchdog + stuck detector jalan otomatis tiap step. Stuck detector
+> kenali captcha / login-wall / consent / paywall / challenge Cloudflare:
+> consent di-auto-klik, captcha pause + lapor (nggak ditebak).
+> `kancil session-replay flow.jsonl --var query=x` — rekam sekali, replay
+> dengan input beda. `kancil scroll-until "teks"` — scroll sampai ketemu
+> atau konten habis (feed infinite).
 
 ## Stealth (impersonasi browser)
 

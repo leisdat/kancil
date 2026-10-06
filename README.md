@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-3.14.0-brightgreen" alt="version">
-  <img src="https://img.shields.io/badge/tests-420%20unit-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/tests-444%20unit-brightgreen" alt="tests">
   <img src="https://img.shields.io/badge/size-%7E100%20KB-blue" alt="size">
   <img src="https://img.shields.io/badge/dependencies-0%20required-blue" alt="zero required deps">
   <img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="python">
@@ -136,6 +136,39 @@ decrypts and `session_import`s in one step.
 **📦 Network log with bodies** — `kancil network --with-bodies` attaches
 `has_body` + 300-char `body_preview` to each entry (static: captured
 bodies; webview: joins `/network/bodies`).
+
+## Autopilot
+
+**🐕 Zombie-tab watchdog** — `kancil health` probes tab responsiveness
+(constant `1+1` JS probe; a null streak means a zombie tab — the exact
+failure seen live). `kancil health --recover` (or the `recover_zombie`
+tool) closes the dead tab and reopens the URL in a fresh one, verified.
+
+**🌅 Settled navigation** — `open(url, settle=True)` / `wait_settled()`:
+document complete + network quiet + DOM stable before returning. Kills
+the "evaluate right after navigate" race class.
+
+**🚀 `kancil autopilot plan.json`** — multi-step plans with per-step
+`verify`/`verify_text`, retries + backoff, screenshot on failure,
+JSON checkpoint + `--resume`, `{{variable}}` substitution
+(`--var k=v`), and `vault:` for auto session restore at start. The
+watchdog and stuck detector run automatically before every step.
+
+**🚧 Stuck detector** — recognizes captcha / login wall / consent /
+paywall / Cloudflare challenge from page text. Consent banners are
+auto-clicked; captchas pause the run with a human hint instead of being
+guessed (`check_stuck` / `resolve_stuck`).
+
+**📜 Parameterized replay** — `kancil session-replay flow.jsonl --var
+query=kancil`: record once, replay with different inputs.
+
+**🔄 Auto session restore** — `kancil autopilot --vault fb-sesi` (or the
+`vault_restore` tool) decrypts and `session_import`s on start, so logins
+survive app kills.
+
+**⬇️ `scroll_until`** — `kancil scroll-until "teks"` scrolls until the
+text/selector appears or content is exhausted (delta 0). Built for
+infinite feeds.
 
 **🧩 Playwright engine (optional)** — real Chromium for full JS,
 screenshots, PDF. Same API. Auto-detects Camoufox on Termux.

@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Added (autopilot: agent selancar internet mandiri & nyaman)
+- **Zombie-tab watchdog** (`kancil/watchdog.py`): probe JS konstan
+  `1+1` — null = zombie (belang verifikasi live 2026-10-05).
+  `Kancil.evaluate("1+1")` melacak null-streak; `health_check()`,
+  `recover_zombie()` (tutup tab mati → tab baru → open URL →
+  settle), `kancil health [--recover]`, tool actions.
+- **Settled navigation**: `open(url, settle=True)` /
+  `wait_settled(timeout, quiet_ms)` — document complete + network
+  quiet + DOM stabil (2 sampel) sebelum return; tool action
+  `wait_settled`, param `settle` di action `open`.
+- **`kancil autopilot plan.json`** (`kancil/autopilot.py`): plan
+  multi-step dengan verify/verify_text per step, retry + backoff,
+  screenshot tiap gagal (`~/.kancil/autopilot-shots/`), checkpoint
+  JSON + `--resume`, substitusi `{{var}}` (`--var k=v`, + default di
+  plan), `vault:` auto-restore. Watchdog + stuck detector otomatis
+  tiap step. Tool action `run_plan`.
+- **Stuck detector** (`kancil/stuck.py`): pola captcha / login-wall /
+  consent / paywall / Cloudflare challenge dari teks halaman;
+  `check_stuck()`, `resolve_stuck()` — consent di-auto-klik
+  (cascade tombol umum), challenge ditunggu 4 dtk, captcha/login/
+  paywall pause + hint manusia (tidak ditebak).
+- **Replay berparameter**: `session_replay(..., variables={})`
+  substitusi `{{nama}}` rekursif di params; CLI
+  `kancil session-replay f.jsonl --var k=v` (repeatable).
+- **Auto-restore sesi**: `Kancil.restore_vault(name)` /
+  `vault_restore` tool / `kancil autopilot --vault <nama>`.
+- **`scroll_until(text|selector)`**: scroll sampai ketemu atau
+  delta 0 (konten habis); CLI `kancil scroll-until "teks"`
+  (`--selector`, `--max`, `--pixels`); tool action.
+- 138 tool actions; 24 test baru (`tests/test_autopilot.py`).
+
 ### Added (8 saran fitur audit, semua dibangun)
 - **MCP server** (`kancil mcp [--engine]`): 130 tool actions sebagai MCP
   tools via stdio JSON-RPC (initialize, tools/list, tools/call, ping).
