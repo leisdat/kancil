@@ -22,7 +22,7 @@ classifiers = [
 kancil = "kancil.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/farul/kancil"
+Homepage = "https://github.com/leisdat/kancil"
 
 [tool.setuptools.dynamic]
 version = { attr = "kancil.__version__" }

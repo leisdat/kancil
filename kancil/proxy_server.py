@@ -37,7 +37,28 @@ def ca_dir():
     from . import session as session_mod
     d = os.path.join(session_mod.BASE, "ca")
     os.makedirs(d, exist_ok=True)
+    try:
+        os.chmod(d, 0o700)  # kunci CA: jangan bisa di-list grup/other
+    except OSError:
+        pass
     return d
+
+
+def _write_private(path, pem_text):
+    """Tulis file kunci privat secara atomik dengan mode 0600.
+
+    open(path, "w") + chmod belakangan menyisakan jendela di mana file
+    berizin 0644 (umask 022) — untuk kunci CA MITM itu tidak boleh.
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, pem_text.encode())
+    finally:
+        os.close(fd)
+    try:
+        os.chmod(path, 0o600)  # pastikan, walau file sudah ada
+    except OSError:
+        pass
 
 
 def ca_paths():
@@ -75,12 +96,8 @@ def ensure_ca():
         ca_der = x509.make_ca(CA_CN, ca_key)
         with open(crt, "w") as f:
             f.write(x509.pem_encode("CERTIFICATE", ca_der))
-        with open(key, "w") as f:
-            f.write(x509.rsa_private_pem(ca_key))
-        with open(hkey, "w") as f:
-            f.write(x509.rsa_private_pem(host_key))
-        os.chmod(key, 0o600)
-        os.chmod(hkey, 0o600)
+        _write_private(key, x509.rsa_private_pem(ca_key))
+        _write_private(hkey, x509.rsa_private_pem(host_key))
         return crt, key
     except Exception as e:
         if not openssl_ok():
@@ -93,17 +110,18 @@ def ensure_ca():
 def _ensure_ca_openssl():
     """Fallback: original openssl-based CA generation."""
     crt, key = ca_paths()
+    # pre-create key files 0600: openssl menulis dengan mode file yang ada
+    _write_private(key, "")
+    _write_private(_host_key_path(), "")
     subprocess.run(
         ["openssl", "req", "-x509", "-newkey", "rsa:2048",
          "-keyout", key, "-out", crt, "-days", "825", "-nodes",
          "-subj", "/CN=" + CA_CN], check=True, timeout=60,
         capture_output=True)
-    os.chmod(key, 0o600)
     # openssl path uses per-host keys; create a shared host key for uniformity
     subprocess.run(
         ["openssl", "genrsa", "-out", _host_key_path(), "2048"],
         check=True, timeout=60, capture_output=True)
-    os.chmod(_host_key_path(), 0o600)
     return crt, key
 
 
@@ -176,14 +194,19 @@ def _host_cert_openssl(host, crt, key, d, safe):
 
 
 def inject_agent(html, page_url, agent_base):
-    """Insert the agent.js script tag before </body> (or append)."""
+    """Insert the agent.js script tag before </body> (or append).
+
+    The tag carries ?key=<agent-key> so the injected agent.js passes
+    the auth check on its register/poll/result calls.
+    """
+    from . import agent_key as _ak
     if isinstance(html, bytes):
         try:
             html = html.decode("utf-8")
         except Exception:
             return html
-    tag = ('<script src="%s/agent.js" data-kancil-url="%s"></script>'
-           % (agent_base, page_url.replace('"', "&quot;")))
+    tag = ('<script src="%s/agent.js?key=%s" data-kancil-url="%s"></script>'
+           % (agent_base, _ak.get_or_create(), page_url.replace('"', "&quot;")))
     if re.search(r"</body\s*>", html, re.I):
         html = re.sub(r"</body\s*>", tag + "</body>", html, count=1,
                       flags=re.I)
@@ -344,7 +367,7 @@ class ProxyServer:
         # agent endpoints served locally
         u = up.urlsplit(target)
         if not u.netloc and target.startswith("/__kancil__/"):
-            return self._serve_agent(conn, target, body)
+            return self._serve_agent(conn, target, body, headers=headers)
         if scheme == "http" and not u.netloc:
             self._simple(conn, 400, b"proxy needs absolute URI")
             return True
@@ -396,14 +419,14 @@ class ProxyServer:
                    "bytes": len(rbody), "mitm": scheme == "https"})
         return True  # we always close (simple + correct)
 
-    def _serve_agent(self, conn, target, body):
+    def _serve_agent(self, conn, target, body, headers=None):
         u = up.urlsplit(target)
         query = {k: v[0] for k, v in up.parse_qs(u.query).items()}
         try:
             bobj = json.loads(body.decode("utf-8")) if body else {}
         except Exception:
             bobj = {}
-        routed = route_agent(u.path, query, bobj)
+        routed = route_agent(u.path, query, bobj, headers=headers)
         if routed is None:
             self._simple(conn, 404, b"not found")
             return True
@@ -462,7 +485,7 @@ class ProxyServer:
                     body = self._read_body(tfp, h2)
                     # target2 is origin-form (/path); build absolute
                     if target2.startswith("/__kancil__/"):
-                        if self._serve_agent(tls, target2, body):
+                        if self._serve_agent(tls, target2, body, headers=h2):
                             break
                         continue
                     if not target2.startswith("/"):

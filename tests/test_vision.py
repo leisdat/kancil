@@ -179,7 +179,9 @@ class LocateTest(unittest.TestCase):
         png = make_png(400, 800, square=(100, 200, 40))
         from PIL import Image
         img = Image.open(io.BytesIO(png))
-        tpl = img.crop((100, 200, 140, 240))
+        # crop dengan border putih 5px: template harus punya variasi
+        # (template uniform ditolak locate_template — lihat test di bawah)
+        tpl = img.crop((95, 195, 145, 245))
         buf = io.BytesIO()
         tpl.save(buf, format="PNG")
         r = v.locate_template(png, buf.getvalue(), threshold=0.9)
@@ -189,6 +191,24 @@ class LocateTest(unittest.TestCase):
         self.assertAlmostEqual(c["x"], 300, delta=15)
         self.assertAlmostEqual(c["y"], 275, delta=15)
         self.assertGreaterEqual(c["score"], 0.9)
+
+    def test_template_uniform_rejected(self):
+        from kancil import vision as v
+        try:
+            import cv2  # noqa: F401
+        except Exception:
+            self.skipTest("butuh opencv")
+        # template uniform (kotak hitam polos): TM_CCOEFF_NORMED degenerat
+        # (skor 1.0 palsu di (0,0)) -> harus ditolak dengan pesan jelas
+        png = make_png(400, 800, square=(100, 200, 40))
+        from PIL import Image
+        img = Image.open(io.BytesIO(png))
+        tpl = img.crop((100, 200, 140, 240))
+        buf = io.BytesIO()
+        tpl.save(buf, format="PNG")
+        r = v.locate_template(png, buf.getvalue())
+        self.assertFalse(r["success"])
+        self.assertIn("uniform", r["error"])
 
 
 class PlumbingTest(unittest.TestCase):

@@ -18,6 +18,8 @@ import time
 import urllib.parse as up
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from . import agent_key
+
 GW = "/__kancil__"
 
 
@@ -30,13 +32,17 @@ def _abs(base, url):
         return url
 
 
-def rewrite_html(html, page_url, gw=GW):
+def rewrite_html(html, page_url, gw=GW, key=None):
     """Inject <base>, toolbar, agent.js; route links/forms through the gateway.
 
     gw: absolute gateway base, e.g. http://127.0.0.1:8901/__kancil__.
-    Must be absolute: pages carry a <base> tag pointing at the origin."""
+    Must be absolute: pages carry a <base> tag pointing at the origin.
+    key: agent key — ditempel sebagai &key= agar aksi gateway lolos auth
+    (halaman gateway di-render dari server sendiri = same-origin)."""
     if isinstance(html, bytes):
         html = html.decode("utf-8", errors="replace")
+
+    keyq = ("&key=%s" % up.quote(key, safe="")) if key else ""
 
     def _go(m):
         # quoted or unquoted href value
@@ -48,7 +54,7 @@ def rewrite_html(html, page_url, gw=GW):
         absu = _abs(page_url, url)
         if not absu.startswith(("http://", "https://")):
             return m.group(0)
-        return 'href="%s/go?u=%s"' % (gw, up.quote(absu, safe=""))
+        return 'href="%s/go?u=%s%s"' % (gw, up.quote(absu, safe=""), keyq)
 
     # route <a href> through the gateway (quoted or unquoted values)
     html = re.sub(r'href=(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))', _go,
@@ -64,11 +70,11 @@ def rewrite_html(html, page_url, gw=GW):
             return tag  # POST forms left to origin (v1 limitation)
         absu = _abs(page_url, mu.group(2)) if mu else page_url
         tag2 = re.sub(r'action=(["\']).*?\1',
-                      'action="%s/go?u=%s"' % (gw, up.quote(absu, safe="")),
+                      'action="%s/go?u=%s%s"' % (gw, up.quote(absu, safe=""), keyq),
                       tag, flags=re.I)
         if not mu:
-            tag2 = tag2.replace("<form", '<form action="%s/go?u=%s"'
-                                % (gw, up.quote(absu, safe="")), 1)
+            tag2 = tag2.replace("<form", '<form action="%s/go?u=%s%s"'
+                                % (gw, up.quote(absu, safe=""), keyq), 1)
         return tag2
     html = re.sub(r'<form\b[^>]*>', _form, html, flags=re.I)
 
@@ -102,9 +108,11 @@ def rewrite_html(html, page_url, gw=GW):
     else:
         html = bar + html
 
-    # agent.js: lets Kancil drive the REAL rendered page (level 1)
-    agent_tag = ('<script src="%s/agent.js" data-kancil-url="%s"></script>'
-                 % (gw, page_url.replace('"', '&quot;')))
+    # agent.js: lets Kancil drive the REAL rendered page (level 1).
+    # ?key= agar register/poll/result lolos auth.
+    _ak = ("?key=%s" % up.quote(key, safe="")) if key else ""
+    agent_tag = ('<script src="%s/agent.js%s" data-kancil-url="%s"></script>'
+                 % (gw, _ak, page_url.replace('"', '&quot;')))
     if "</body>" in html.lower():
         html = re.sub(r"</body\s*>", agent_tag + "</body>", html,
                       count=1, flags=re.I)
@@ -122,8 +130,9 @@ iframe{border:0;width:100%%;height:100vh}</style></head>
 <body><iframe src="/page" title="kancil page"></iframe></body></html>"""
 
 
-def _shell_pw():
-    return """<!doctype html><html><head><meta charset="utf-8">
+def _shell_pw(key):
+    kq = up.quote(key, safe="")
+    return ("""<!doctype html><html><head><meta charset="utf-8">
 <title>kancil view (playwright)</title>
 <style>html,body{margin:0;background:#111;color:#eee;
 font:13px system-ui,sans-serif}
@@ -134,19 +143,20 @@ background:#1a1a1a;border-bottom:1px solid #333;position:sticky;top:0;z-index:9}
 #shot{max-width:100%%;border:1px solid #444;cursor:crosshair}
 #msg{color:#888}</style></head><body>
 <div id="bar">
-<a href="/__kancil__/back">&#9660;</a><a href="/__kancil__/forward">&#9654;</a>
-<a href="/__kancil__/reload">&#10227;</a>
+<a href="/__kancil__/back?key=%(kq)s">&#9660;</a><a href="/__kancil__/forward?key=%(kq)s">&#9654;</a>
+<a href="/__kancil__/reload?key=%(kq)s">&#10227;</a>
 <input id="t" placeholder="type text, Enter to send" style="flex:1;max-width:300px;
 background:#222;color:#eee;border:1px solid #444;padding:4px 8px">
 <button id="refresh">refresh</button>
 <span id="msg">click the image = click in Chromium</span>
 <span style="margin-left:auto;color:#888">kancil view</span></div>
-<div id="wrap"><img id="shot" src="/shot.png"></div>
+<div id="wrap"><img id="shot" src="/shot.png?key=%(kq)s"></div>
 <script>
+const KK='%(kq)s', KH={'X-Kancil-Key':KK};
 const shot=document.getElementById('shot'),msg=document.getElementById('msg');
 let vw={width:1280,height:800};
-fetch('/__kancil__/viewport').then(r=>r.json()).then(v=>{vw=v}).catch(()=>{});
-function refresh(){shot.src='/shot.png?t='+Date.now()}
+fetch('/__kancil__/viewport?key='+KK).then(r=>r.json()).then(v=>{vw=v}).catch(()=>{});
+function refresh(){shot.src='/shot.png?t='+Date.now()+'&key='+KK}
 document.getElementById('refresh').onclick=refresh;
 setInterval(refresh,3000);
 shot.onclick=e=>{
@@ -154,14 +164,14 @@ shot.onclick=e=>{
   const x=Math.round((e.clientX-r.left)/r.width*vw.width);
   const y=Math.round((e.clientY-r.top)/r.height*vw.height);
   msg.textContent='click '+x+','+y+' ...';
-  fetch('/__kancil__/click?x='+x+'&y='+y).then(()=>{refresh();
+  fetch('/__kancil__/click?x='+x+'&y='+y,{headers:KH}).then(()=>{refresh();
     msg.textContent='clicked '+x+','+y;}).catch(err=>{msg.textContent=err;});
 };
 document.getElementById('t').addEventListener('keydown',e=>{
   if(e.key==='Enter'){const v=e.target.value;e.target.value='';
-    fetch('/__kancil__/type?text='+encodeURIComponent(v)).then(refresh);}
+    fetch('/__kancil__/type?text='+encodeURIComponent(v),{headers:KH}).then(refresh);}
 });
-</script></body></html>"""
+</script></body></html>""" % {"kq": kq})
 
 
 def _extract_video_id(target):
@@ -282,10 +292,11 @@ class _Handler(BaseHTTPRequestHandler):
         u = up.urlsplit(self.path)
         path, q = u.path, up.parse_qs(u.query)
         eng = self.k.engine
+        hdrs = dict(self.headers)
 
         if path == "/":
-            shell = _shell_pw() if eng.name == "playwright" \
-                else _shell_static()
+            shell = _shell_pw(agent_key.get_or_create()) \
+                if eng.name == "playwright" else _shell_static()
             return self._send(200, shell)
 
         if path == "/page":
@@ -299,10 +310,24 @@ class _Handler(BaseHTTPRequestHandler):
             url = getattr(p, "url", "")
             host, port = self.server.server_address[:2]
             gw = "http://%s:%d%s" % (host, port, GW)
-            return self._send(200, rewrite_html(raw, url, gw))
+            return self._send(200, rewrite_html(raw, url, gw,
+                                               agent_key.get_or_create()))
 
         if not path.startswith(GW + "/"):
             return self._send(404, "not found", "text/plain")
+
+        # ---- auth: semua aksi gateway wajib token ----
+        # agent.js statis boleh publik; sisanya: Host loopback + token
+        # (header X-Kancil-Key atau ?key=). Tanpa ini, halaman web asing
+        # bisa menyetir browser via <img src="http://127.0.0.1:port/...">
+        # (CSRF lokal) atau membaca snapshot via DNS rebinding.
+        if path != GW + "/agent.js":
+            ok, why = agent_key.check_request(
+                hdrs, {k: v[0] for k, v in q.items()})
+            if not ok:
+                return self._json({"success": False,
+                                   "errors": ["unauthorized: " + why]}, 401)
+
         action = path[len(GW) + 1:]
 
         # ---- level 1: injected JS agent (shared routing) ----
@@ -311,15 +336,17 @@ class _Handler(BaseHTTPRequestHandler):
             routed = route_agent(path,
                                  {k: v[0] for k, v in q.items()},
                                  self._read_json() if self.command == "POST"
-                                 else {})
+                                 else {},
+                                 headers=hdrs)
             if routed is not None:
                 code, ctype, body = routed
                 return self._send(code, body, ctype)
 
         if action == "go":
             target = q.get("u", [""])[0]
-            # merge extra form fields into the target URL (GET forms)
-            rest = {k: v for k, v in q.items() if k != "u"}
+            # merge extra form fields into the target URL (GET forms);
+            # "key" adalah token auth gateway, bukan bagian URL target.
+            rest = {k: v for k, v in q.items() if k not in ("u", "key")}
             if target and rest:
                 extra = up.urlencode({k: v[0] for k, v in rest.items()})
                 target += ("&" if "?" in target else "?") + extra

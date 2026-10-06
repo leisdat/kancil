@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-3.14.0-brightgreen" alt="version">
-  <img src="https://img.shields.io/badge/tests-240%20unit-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/tests-384%20unit-brightgreen" alt="tests">
   <img src="https://img.shields.io/badge/size-%7E100%20KB-blue" alt="size">
   <img src="https://img.shields.io/badge/dependencies-0%20required-blue" alt="zero required deps">
   <img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="python">

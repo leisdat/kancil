@@ -15,10 +15,16 @@ Alur sinkronisasi:
 """
 
 import os
+import hmac
 import secrets
 import stat
 
 KEY_NAME = "agent.key"
+HEADER = "X-Kancil-Key"
+
+# Host yang boleh: loopback saja. Ini pertahanan lawan DNS rebinding —
+# request rebinding datang dengan Host: <domain-penyerang>.
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def base_dir():
@@ -78,3 +84,39 @@ def key_mode_ok():
     except OSError:
         return False
     return not (st.st_mode & (stat.S_IRGRP | stat.S_IROTH))
+
+
+def check_request(headers, query):
+    """Cek auth untuk server HTTP lokal Kancil (viewer, proxy).
+
+    headers: dict header request (key case-insensitive).
+    query: dict query param (nilai pertama).
+    Returns (True, "") atau (False, alasan).
+
+    Dua lapis:
+    - Host harus loopback (lawan DNS rebinding: request rebinding
+      membawa Host: <domain penyerang>, bukan 127.0.0.1).
+    - Token via header X-Kancil-Key atau ?key= (lawan CSRF: halaman
+      asing tidak bisa menebak token, jadi <img src=...> ke
+      127.0.0.1 tidak bisa memicu aksi).
+    """
+    hd = {str(k).lower(): v for k, v in dict(headers or {}).items()}
+    host = hd.get("host", "").split(":")[0].strip().lower().strip("[]")
+    if host not in LOOPBACK_HOSTS:
+        return False, "host %r bukan loopback" % host
+    # Origin/Referer asing juga ditolak (lapis tambahan lawan CSRF)
+    for h in ("origin", "referer"):
+        o = hd.get(h, "")
+        if o:
+            try:
+                import urllib.parse as _up
+                oh = (_up.urlsplit(o).hostname or "").lower()
+            except Exception:
+                oh = ""
+            if oh and oh not in LOOPBACK_HOSTS:
+                return False, "%s asing: %s" % (h, oh)
+    key = get_or_create()
+    given = hd.get(HEADER.lower(), "") or (query or {}).get("key", "")
+    if not given or not hmac.compare_digest(str(given), key):
+        return False, "token salah/hilang (header %s atau ?key=)" % HEADER
+    return True, ""

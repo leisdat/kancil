@@ -1141,6 +1141,8 @@ class BrowserTest(unittest.TestCase):
                 return {"success": True}
 
         from kancil.viewer import ViewerServer
+        from kancil import agent_key
+        key = agent_key.get_or_create()
         srv = ViewerServer(FakeK(), port=0)
         url = srv.start()
         try:
@@ -1150,6 +1152,7 @@ class BrowserTest(unittest.TestCase):
                                           timeout=5).read().decode()
             self.assertIn("__kancil_bar", page)
             self.assertIn("__kancil__/go?u=", page)
+            self.assertIn("key=" + key[:8], page)
 
             class NoRedir(urllib.request.HTTPRedirectHandler):
                 def redirect_request(self, *a, **k):
@@ -1158,13 +1161,20 @@ class BrowserTest(unittest.TestCase):
             op = urllib.request.build_opener(NoRedir)
             try:
                 op.open(url + "__kancil__/go?u=" +
-                        "https%3A%2F%2Fex.com%2Fnext", timeout=5)
+                        "https%3A%2F%2Fex.com%2Fnext&key=" + key, timeout=5)
             except urllib.error.HTTPError as e:
                 self.assertEqual(e.code, 302)
             self.assertEqual(opened, ["https://ex.com/next"])
+            # tanpa token -> 401
+            try:
+                op.open(url + "__kancil__/go?u=" +
+                        "https%3A%2F%2Fex.com%2Fnext", timeout=5)
+                self.fail("expected 401")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
             # playwright-only routes rejected on static engine
             try:
-                op.open(url + "__kancil__/click?x=1&y=2", timeout=5)
+                op.open(url + "__kancil__/click?x=1&y=2&key=" + key, timeout=5)
                 self.fail("expected 400")
             except urllib.error.HTTPError as e:
                 self.assertEqual(e.code, 400)
@@ -1209,25 +1219,29 @@ class BrowserTest(unittest.TestCase):
             engine = FakeEng()
 
         from kancil.viewer import ViewerServer
+        from kancil import agent_key
+        key = agent_key.get_or_create()
         srv = ViewerServer(FakeK(), port=0)
         url = srv.start()
         try:
-            shot = urllib.request.urlopen(url + "__kancil__/shot.png",
+            shot = urllib.request.urlopen(url + "__kancil__/shot.png?key=" + key,
                                           timeout=5)
             self.assertEqual(shot.headers.get_content_type(), "image/png")
             self.assertEqual(shot.read(), b"FAKEPNG")
             vp = _json.loads(urllib.request.urlopen(
-                url + "__kancil__/viewport", timeout=5).read())
+                url + "__kancil__/viewport?key=" + key, timeout=5).read())
             self.assertEqual(vp["width"], 1280)
             r = _json.loads(urllib.request.urlopen(
-                url + "__kancil__/click?x=10&y=20", timeout=5).read())
+                url + "__kancil__/click?x=10&y=20&key=" + key,
+                timeout=5).read())
             self.assertTrue(r["success"])
             self.assertEqual(clicks, [(10, 20)])
-            urllib.request.urlopen(url + "__kancil__/type?text=hi",
+            urllib.request.urlopen(url + "__kancil__/type?text=hi&key=" + key,
                                    timeout=5).read()
             self.assertEqual(types, ["hi"])
             root = urllib.request.urlopen(url, timeout=5).read().decode()
             self.assertIn('id="shot"', root)
+            self.assertIn("key=" + key[:8], root)
         finally:
             srv.stop()
 
@@ -1290,18 +1304,22 @@ class BrowserTest(unittest.TestCase):
                         "image": "https://i.yt/i.jpg"}
 
         from kancil.viewer import ViewerServer
+        from kancil import agent_key
+        key = agent_key.get_or_create()
         fk = FakeK()
         srv = ViewerServer(fk, port=0)
         url = srv.start()
         try:
-            body = urllib.request.urlopen(url + "__kancil__/play?v=abc123XYZ78",
-                                          timeout=5).read().decode()
+            body = urllib.request.urlopen(
+                url + "__kancil__/play?v=abc123XYZ78&key=" + key,
+                timeout=5).read().decode()
             self.assertIn("/embed/abc123XYZ78", body)
             self.assertIn("<title>T", body)
             self.assertEqual(fk.last,
                              "https://www.youtube.com/watch?v=abc123XYZ78")
             try:
-                urllib.request.urlopen(url + "__kancil__/play", timeout=5)
+                urllib.request.urlopen(url + "__kancil__/play?key=" + key,
+                                       timeout=5)
                 self.fail("expected 400")
             except urllib.error.HTTPError as e:
                 self.assertEqual(e.code, 400)
@@ -1370,6 +1388,8 @@ class BrowserTest(unittest.TestCase):
 
         from kancil.viewer import ViewerServer
         from kancil.agent_bridge import get_bridge
+        from kancil import agent_key
+        key = agent_key.get_or_create()
         srv = ViewerServer(FakeK(), port=0)
         url = srv.start()
         try:
@@ -1377,12 +1397,13 @@ class BrowserTest(unittest.TestCase):
                                         timeout=5).read().decode()
             self.assertIn("kancil agent.js", js)
             self.assertIn("/poll", js)
-            # register via POST
+            # register via POST (dengan auth header)
             req = urllib.request.Request(
                 url + "__kancil__/agent/register",
                 data=_json.dumps({"tab": "tab-ut",
                                   "url": "https://ex.com/"}).encode(),
-                headers={"Content-Type": "application/json"})
+                headers={"Content-Type": "application/json",
+                         "X-Kancil-Key": key})
             r = _json.loads(urllib.request.urlopen(req,
                                                    timeout=5).read())
             self.assertTrue(r["success"])
@@ -1390,7 +1411,7 @@ class BrowserTest(unittest.TestCase):
             self.assertTrue(any(t["tab_id"] == "tab-ut" for t in tabs))
             # poll returns [] when idle
             p = _json.loads(urllib.request.urlopen(
-                url + "__kancil__/agent/poll?tab=tab-ut&seq=0",
+                url + "__kancil__/agent/poll?tab=tab-ut&seq=0&key=" + key,
                 timeout=35).read())
             self.assertEqual(p, [])
             get_bridge().unregister("tab-ut")

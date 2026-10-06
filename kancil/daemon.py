@@ -260,6 +260,11 @@ class _Server:
             pass
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._sock.bind(sock_path())
+        try:
+            # socket unix: jangan bergantung pada umask — kunci 0600
+            os.chmod(sock_path(), 0o600)
+        except OSError:
+            pass
         self._sock.listen(16)
         self._sock.settimeout(0.5)
         try:

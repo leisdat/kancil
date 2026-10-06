@@ -31,6 +31,15 @@
   var _cs = document.currentScript;
   var _src = (_cs && _cs.src) || '';
   var BASE = _src.replace(/\/agent\.js.*$/, '/agent') || '/__kancil__/agent';
+  // agent key dari query ?key= pada <script src> (disuntik server) —
+  // diteruskan ke semua panggilan API agar lolos auth.
+  var _km = /[?&]key=([^&]+)/.exec(_src || '');
+  var KKEY = _km ? decodeURIComponent(_km[1]) : '';
+  function _withKey(url) {
+    if (!KKEY) return url;
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') +
+           'key=' + encodeURIComponent(KKEY);
+  }
   // the real page URL (we are served through the viewer gateway)
   var REAL_URL = (_cs && _cs.getAttribute('data-kancil-url')) || location.href;
   var TAB = 'tab-' + Math.random().toString(36).slice(2) +
@@ -40,7 +49,7 @@
   var fails = 0; // consecutive poll failures (auto-reconnect)
 
   function post(path, obj) {
-    return fetch(BASE + path, {
+    return fetch(_withKey(BASE + path), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(obj)
@@ -131,7 +140,7 @@
   function poll() {
     if (polling) return;
     polling = true;
-    fetch(BASE + '/poll?tab=' + encodeURIComponent(TAB) + '&seq=' + seq)
+    fetch(_withKey(BASE + '/poll?tab=' + encodeURIComponent(TAB) + '&seq=' + seq))
       .then(function (r) { return r.json(); })
       .then(function (cmds) {
         polling = false;

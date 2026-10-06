@@ -38,5 +38,6 @@ brag-output/work/audio*.wav
 brag-output/work/vo/
 brag-output/work/*.png
 brag-output/work/*.jpg
-brag-output/brag.mp4
+brag-output/*.mp4
 brag-output/brag.jpg
+brag-output/work/*.wav

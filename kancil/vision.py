@@ -119,6 +119,12 @@ def locate_template(png_bytes, template, threshold=TEMPLATE_THRESHOLD,
             scale = min(sh / th, sw / tw) * 0.95
             tpl = cv2.resize(tpl, (int(tw * scale), int(th * scale)))
             th, tw = tpl.shape[:2]
+        if float(tpl.std()) < 1e-6:
+            # TM_CCOEFF_NORMED degenerat pada template uniform: skor 1.0
+            # palsu di (0,0). Tolak dengan pesan jelas.
+            return {"success": False, "backend": "template",
+                    "error": "template tanpa variasi (uniform); crop harus "
+                             "menyertakan tepi/tekstur objek"}
         res = cv2.matchTemplate(screen, tpl, cv2.TM_CCOEFF_NORMED)
         cands = []
         if multiple:

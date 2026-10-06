@@ -147,11 +147,16 @@ def _agent_js_bytes():
         return f.read()
 
 
-def route_agent(path, query, body):
+def route_agent(path, query, body, headers=None):
     """Handle /__kancil__/agent* paths.
 
     path: e.g. "/__kancil__/agent/poll"; query: dict; body: parsed JSON (or {}).
+    headers: dict header request (untuk cek auth).
     Returns (status_code, content_type, body_bytes) or None if not an agent path.
+
+    agent.js statis boleh publik; register/poll/result wajib token
+    (header X-Kancil-Key atau ?key=) + Host loopback — tanpa ini halaman
+    asing bisa mendaftarkan tab palsu / mencuri snapshot via DNS rebinding.
     """
     GW = "/__kancil__"
     if not path.startswith(GW + "/"):
@@ -163,11 +168,21 @@ def route_agent(path, query, body):
         return (code, "application/json",
                 json.dumps(obj).encode("utf-8"))
 
+    def _unauth():
+        return _json({"success": False,
+                      "error": "unauthorized: butuh header X-Kancil-Key "
+                               "atau ?key="}, 401)
+
     if action == "agent.js":
         try:
             return (200, "application/javascript", _agent_js_bytes())
         except OSError:
             return (404, "text/plain", b"agent.js missing")
+    if action in ("agent/register", "agent/poll", "agent/result"):
+        from . import agent_key
+        ok, _why = agent_key.check_request(headers or {}, query or {})
+        if not ok:
+            return _unauth()
     if action == "agent/register":
         tab = body.get("tab") or ("tab-%d" % int(time.time() * 1000))
         br.register(tab, body)

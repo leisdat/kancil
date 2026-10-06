@@ -21,3 +21,17 @@ jobs:
         # test_live.py is opt-in: needs public network + Chromium +
         # playwright (see its docstring). Everything else must pass.
         run: python -m pytest tests/ -q -p no:cacheprovider --ignore=tests/test_live.py
+
+  test-opencv:
+    # cv2 branch of vision.locate_template is skipped without opencv;
+    # this job covers it (incl. the zero-variance template guard).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test deps
+        run: pip install pytest pillow opencv-python-headless numpy
+      - name: Vision tests (cv2 backend)
+        run: python -m pytest tests/test_vision.py -q -p no:cacheprovider
