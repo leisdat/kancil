@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+### Added (8 saran fitur audit, semua dibangun)
+- **MCP server** (`kancil mcp [--engine]`): 130 tool actions sebagai MCP
+  tools via stdio JSON-RPC (initialize, tools/list, tools/call, ping).
+  Claude Desktop / agent MCP lain bisa menyetir Kancil langsung.
+  Zero dependency baru; log ke stderr, stdout murni protokol.
+- **JSON Schema per action** (`kancil tool --schema [action]`,
+  `Kancil.action_json_schema()` / `validate_action()`): draft 2020-12,
+  di-derive dari manifest runtime. Dipakai MCP server sebagai
+  inputSchema; untuk introspeksi LLM dan validasi input.
+- **Snapshot hemat token**: `snapshot --compact` (tanpa a11y tree/DOM,
+  daftar dipangkas) + `snapshot_diff(a, b)` (added/removed
+  links/buttons/inputs/headings, url/title changed, summary) —
+  `kancil snapshot --diff` untuk 2 snapshot terakhir sesi.
+- **Penanda konten tidak tepercaya + konfirmasi destruktif**
+  (`kancil/safety.py`): `snapshot()` menandai konten halaman sebagai
+  data pihak ketiga (anti prompt injection); `session_clear`,
+  `session_delete`, `storage_delete`, `bookmark_delete`, `close_tab`
+  butuh `"confirm": true` di tool() (error CONFIRM_REQUIRED) kecuali
+  `Kancil(confirm_destructive=False)`. Param `confirm` terdokumentasi
+  di JSON Schema tiap aksi destruktif.
+- **Rekam & putar ulang sesi**: `session_record_start/stop(path)`
+  (JSONL tiap tool call; call yang ditolak gate tidak terekam) +
+  `session_replay(path, dry_run, stop_on_error)`; CLI
+  `kancil session-replay <file> [--check] [--continue-on-error]`.
+  Untuk regression test scraper.
+- **Encrypted session vault** (`kancil/vault.py`, zero-dep):
+  AES-256-CBC + HMAC-SHA256 (Encrypt-then-MAC), PBKDF2-HMAC-SHA256
+  200k iterasi; AES terverifikasi lawan vektor FIPS-197 Appendix B.
+  File `~/.kancil/vault/<name>.kv` (0600). API `vault_save/load/list/
+  delete` + tool actions + CLI `kancil vault save|load|list|delete`
+  (password via param / `KANCIL_VAULT_PASSWORD` / prompt);
+  `vault load --restore` langsung session_import.
+- **Status + body di network log**: `kancil network --with-bodies`
+  menempelkan `has_body` + `body_preview` (300 char) ke tiap entri
+  (static: res_body; webview: join `/network/bodies`).
+- **SECURITY.md** + packaging PyPI siap: `python -m build` terverifikasi
+  (sdist + wheel, install bersih di venv fresh). Upload PyPI butuh
+  token akun PyPI Farul — belum di-upload.
+
 ### Security (temuan audit eksternal 2026-10-06, sudah di-fix)
 - **Auth di viewer & agent bridge** (dulu: tanpa auth sama sekali —
   halaman web asing bisa menyetir browser via `<img src>` ke 127.0.0.1

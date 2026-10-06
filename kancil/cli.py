@@ -352,6 +352,8 @@ def build_parser():
     net.add_argument("--method", default=None, help="filter method: GET, POST")
     net.add_argument("--url", default=None, help="filter URL substring")
     net.add_argument("--no-redact", action="store_true", help="disable HAR redaction")
+    net.add_argument("--with-bodies", action="store_true",
+                     help="attach has_body + body_preview (300 chars) per entry")
 
     sto = SP("storage", help="storage devtools")
     sto.add_argument("action", nargs="?", choices=["list", "get", "set", "delete", "cookies"],
@@ -436,6 +438,21 @@ def build_parser():
     se.add_argument("--domain", default=None,
                     help="session clear: limit cookie wiping to one domain "
                          "(e.g. --what cookies --domain example.com)")
+
+    sr = SP("session-replay", help="replay a recorded session (JSONL) — "
+                                   "regression test for scrapers")
+    sr.add_argument("path", help="recording file from session_record_start")
+    sr.add_argument("--check", action="store_true",
+                    help="validate actions/params without executing (dry run)")
+    sr.add_argument("--continue-on-error", action="store_true",
+                    help="don't stop at the first failed step")
+
+    va = SP("vault", help="encrypted session vault (AES-256-CBC + HMAC, "
+                          "PBKDF2; password via KANCIL_VAULT_PASSWORD or prompt)")
+    va.add_argument("action", choices=["save", "load", "list", "delete"])
+    va.add_argument("name", nargs="?", default="default")
+    va.add_argument("--restore", action="store_true",
+                    help="load: session_import langsung kalau data sesi")
 
     ha = SP("har", help="HAR recording session")
     ha.add_argument("action", choices=["start", "stop", "export", "clear", "stats"])
@@ -523,6 +540,9 @@ def build_parser():
     to = SP("tool", help="structured agent tool call (JSON in, JSON out)")
     to.add_argument("payload", nargs="?",
                     help='JSON like \'{"action":"click","selector":"#login"}\' (or stdin)')
+    to.add_argument("--schema", nargs="?", const="",
+                    help="JSON Schema (draft 2020-12) per action; "
+                         "optional action name (default: all)")
 
     sn = SP("snapshot", help="agent context snapshot")
     sn.add_argument("--full", action="store_true")
@@ -530,6 +550,10 @@ def build_parser():
     sn.add_argument("--no-a11y", action="store_true")
     sn.add_argument("--no-links", action="store_true")
     sn.add_argument("--no-forms", action="store_true")
+    sn.add_argument("--compact", action="store_true",
+                    help="preset hemat token (tanpa a11y/DOM, daftar dipangkas)")
+    sn.add_argument("--diff", action="store_true",
+                    help="diff 2 snapshot terakhir sesi ini")
 
     SP("observe", help="observability: console/network/page errors + perf")
     SP("warnings", help="console warnings")
@@ -537,6 +561,9 @@ def build_parser():
                                "per action, generated from _TOOL_ACTIONS)")
     ai.add_argument("--action", default=None,
                     help="single action schema (default: all)")
+
+    mc = SP("mcp", help="MCP server over stdio: 122 tools for MCP clients "
+                        "(Claude Desktop, agents)")
 
     yt = SP("yt-search", help="YouTube search via ytInitialData (no JS)")
     yt.add_argument("query", nargs="+")
@@ -612,11 +639,18 @@ def main(argv=None):
         from . import repl
         repl.run(engine=args.engine)
         return 0
+    if args.cmd == "mcp":
+        # long-lived stdio server: jangan lewat daemon, jangan bikin
+        # browser ganda — MCPServer pegang satu Kancil sendiri.
+        from .mcp_server import MCPServer
+        MCPServer(engine=args.engine, timeout=args.timeout).serve_forever()
+        return 0
 
     # Daemon fast-path: a running daemon means one warm engine
     # (DNS, keep-alive, cookies, tabs) — no per-command startup cost.
     # Everything except long-lived/interactive commands routes through it.
-    if args.cmd not in ("daemon", "shell", "agent", "serve-proxy", "proxy-ca") \
+    if args.cmd not in ("daemon", "shell", "agent", "serve-proxy", "proxy-ca",
+                        "mcp") \
             and not getattr(args, "local", False):
         from . import daemon as _dm
         if _dm.alive():
@@ -831,10 +865,12 @@ def dispatch(b, args):
             return b.network_bodies(clear=(args.target == "clear"))
         filt = dict(type_=args.type, status=args.status, method=args.method)
         if args.action == "filter":
-            return b.network(pattern=args.target, limit=args.limit, **filt)
+            return b.network(pattern=args.target, limit=args.limit,
+                             with_bodies=args.with_bodies, **filt)
         if args.action == "list":
             pat = args.url or None
-            return b.network(pattern=pat, limit=args.limit, **filt)
+            return b.network(pattern=pat, limit=args.limit,
+                             with_bodies=args.with_bodies, **filt)
         try:
             return b.request(int(args.action))
         except (ValueError, TypeError):
@@ -939,6 +975,24 @@ def dispatch(b, args):
             return b.session_clear(getattr(args, "what", "all") or "all",
                                    domain=getattr(args, "domain", None))
         return b.session_list()
+    if c == "session-replay":
+        return b.session_replay(args.path, dry_run=args.check,
+                                stop_on_error=not args.continue_on_error)
+    if c == "vault":
+        import os as _os
+        pw = _os.environ.get("KANCIL_VAULT_PASSWORD")
+        if args.action in ("save", "load") and not pw \
+                and sys.stdin.isatty():
+            import getpass as _gp
+            pw = _gp.getpass("vault password: ")
+        if args.action == "save":
+            return b.vault_save(args.name, password=pw)
+        if args.action == "load":
+            return b.vault_load(args.name, password=pw,
+                                restore=args.restore)
+        if args.action == "list":
+            return b.vault_list()
+        return b.vault_delete(args.name)
     if c == "har":
         if args.action == "start":
             return b.har_start()
@@ -1052,6 +1106,10 @@ def dispatch(b, args):
                 "engine": b._engine_name}
     if c == "tool":
         import json as _json
+        if args.schema is not None:
+            act = args.schema or None
+            print(b.to_json(b.action_json_schema(act)))
+            return {"success": True, "_direct": True}
         payload = args.payload
         if not payload and not sys.stdin.isatty():
             payload = sys.stdin.read()
@@ -1069,9 +1127,11 @@ def dispatch(b, args):
         print(b.to_json(b.tool(data)))
         return {"success": True, "_direct": True}
     if c == "snapshot":
+        if args.diff:
+            return b.snapshot_diff()
         return b.snapshot(full=args.full, dom=args.dom,
                           a11y=not args.no_a11y, links=not args.no_links,
-                          forms=not args.no_forms)
+                          forms=not args.no_forms, compact=args.compact)
     if c == "observe":
         return b.observe()
     if c == "agent-info":

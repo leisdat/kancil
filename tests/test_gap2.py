@@ -363,7 +363,7 @@ class TestManifestNew(unittest.TestCase):
             self.assertTrue(m["returns"])
 
     def test_total(self):
-        self.assertEqual(len(Kancil._TOOL_ACTIONS), 122)
+        self.assertEqual(len(Kancil._TOOL_ACTIONS), 130)
 
 
 if __name__ == "__main__":

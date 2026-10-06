@@ -1728,7 +1728,7 @@ class HermesAgentUXTest(unittest.TestCase):
         try:
             m = k.tool_schema()
             self.assertTrue(m["success"])
-            self.assertEqual(len(m["actions"]), 122)
+            self.assertEqual(len(m["actions"]), 130)
             for a, s in m["actions"].items():
                 self.assertTrue(s["description"], a)
                 self.assertTrue(s["engines"], a)

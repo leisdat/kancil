@@ -211,6 +211,30 @@ JavaScript, dan network log per tab — tanpa perlu agent. Tombol fullscreen vid
 > `kancil doctor` — cek kesehatan sekali jalan: engine static/playwright/webview,
 > server agent, sesi login, disk, environment, status stealth. Kalau ada yang
 > rusak, dikasih tau cara benerinnya.
+>
+> **MCP server**: 130 aksi jadi MCP tools via stdio — `kancil mcp
+> [--engine webview]`. Claude Desktop / agent MCP lain bisa nyetir Kancil
+> langsung.
+>
+> **JSON Schema per aksi**: `kancil tool --schema [aksi]` (draft 2020-12,
+> di-generate dari manifest runtime — nggak pernah basi).
+>
+> **Snapshot compact + diff**: `snapshot --compact` buat polling hemat
+> token; `snapshot_diff()` lapor link/tombol/input/heading yang
+> nambah/hilang (`kancil snapshot --diff`).
+>
+> **Keamanan agent**: konten halaman ditandai tidak tepercaya (anti prompt
+> injection); aksi destruktif (`session_clear`, `session_delete`,
+> `storage_delete`, `bookmark_delete`, `close_tab`) butuh `"confirm": true`.
+>
+> **Rekam/putar sesi**: `session_record_start()` → JSONL → `kancil
+> session-replay` buat regression test scraper.
+>
+> **Vault terenkripsi**: `kancil vault save|load|list|delete`
+> (AES-256-CBC + HMAC, PBKDF2 200k, pure Python).
+>
+> **Network + body**: `kancil network --with-bodies` — tiap entri log
+> ditempeli `has_body` + preview body 300 karakter.
 
 ## Stealth (impersonasi browser)
 

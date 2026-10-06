@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-3.14.0-brightgreen" alt="version">
-  <img src="https://img.shields.io/badge/tests-384%20unit-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/tests-420%20unit-brightgreen" alt="tests">
   <img src="https://img.shields.io/badge/size-%7E100%20KB-blue" alt="size">
   <img src="https://img.shields.io/badge/dependencies-0%20required-blue" alt="zero required deps">
   <img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="python">
@@ -90,7 +90,7 @@ Chrome does the rendering:
   come from *your real browser*. MITM certs are generated in **pure
   Python** — no openssl binary needed.
 
-**🤖 Agent Tool Interface** — 74 actions, JSON-in/JSON-out, structured
+**🤖 Agent Tool Interface** — 130 actions, JSON-in/JSON-out, structured
 errors (`ELEMENT_NOT_FOUND`, `TIMEOUT`, …). `batch` runs 25 actions per
 call; `network_curl` replays any logged request as curl.
 
@@ -98,6 +98,44 @@ call; `network_curl` replays any logged request as curl.
 `yt-video` metadata, `yt-play` mini player (opens the video and triggers
 play; sustained playback for guests can be gated/paused by YouTube —
 full playback realistically needs a logged-in session).
+
+## Agent power tools
+
+**🔌 MCP server** — all 130 actions as MCP tools over stdio:
+`kancil mcp [--engine webview]`. Point Claude Desktop (or any MCP
+client) at `{"command": "kancil", "args": ["mcp"]}` and it can drive
+Kancil directly. `tools/list` serves JSON Schema per tool; `tools/call`
+returns the standard tool envelope.
+
+**📐 JSON Schema per action** — `kancil tool --schema [action]`
+(draft 2020-12, generated from the runtime manifest — never stale).
+For LLM introspection and input validation
+(`Kancil.validate_action()`).
+
+**🗜️ Snapshot compact + diff** — `snapshot --compact` (no a11y tree/DOM,
+trimmed lists) for cheap polling; `snapshot_diff()` reports
+added/removed links, buttons, inputs, headings between two snapshots
+(`kancil snapshot --diff` diffs the last two).
+
+**🛡️ Untrusted-content markers + destructive confirmations** —
+`snapshot()` flags page content as third-party untrusted data (prompt-
+injection defense). `session_clear`, `session_delete`,
+`storage_delete`, `bookmark_delete`, `close_tab` require
+`"confirm": true` unless the instance is created with
+`confirm_destructive=False` (trusted automation).
+
+**⏺️ Session record / replay** — `session_record_start(path)` logs every
+tool call as JSONL (shell/daemon/API); `kancil session-replay file
+[--check]` replays it for scraper regression tests.
+
+**🔐 Encrypted session vault** — `kancil vault save|load|list|delete`
+(AES-256-CBC + HMAC-SHA256, PBKDF2 200k, pure Python, zero new deps).
+Password via `KANCIL_VAULT_PASSWORD` or prompt. `vault load --restore`
+decrypts and `session_import`s in one step.
+
+**📦 Network log with bodies** — `kancil network --with-bodies` attaches
+`has_body` + 300-char `body_preview` to each entry (static: captured
+bodies; webview: joins `/network/bodies`).
 
 **🧩 Playwright engine (optional)** — real Chromium for full JS,
 screenshots, PDF. Same API. Auto-detects Camoufox on Termux.
