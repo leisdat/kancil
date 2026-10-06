@@ -481,6 +481,11 @@ def build_parser():
     he.add_argument("--recover", action="store_true",
                     help="pulihkan otomatis bila zombie terdeteksi")
 
+    cl = SP("clearance", help="cache cf_clearance per host + TTL "
+                              "(lewati challenge ulang)")
+    cl.add_argument("action", choices=["save", "load", "clear"])
+    cl.add_argument("host", nargs="?", default=None)
+
     ha = SP("har", help="HAR recording session")
     ha.add_argument("action", choices=["start", "stop", "export", "clear", "stats"])
     ha.add_argument("path", nargs="?", default="network.har")
@@ -1050,6 +1055,12 @@ def dispatch(b, args):
         return b.scroll_until(text=args.target,
                               max_scrolls=args.max_scrolls,
                               pixels=args.pixels)
+    if c == "clearance":
+        if args.action == "save":
+            return b.clearance_save(args.host)
+        if args.action == "load":
+            return b.clearance_load(args.host)
+        return b.clearance_clear(args.host)
     if c == "health":
         from . import watchdog as _wd
         c = _wd.check(b)

@@ -87,8 +87,29 @@ def page_text(kancil, limit=6000):
     return ""
 
 
+def page_html(kancil, limit=30000):
+    """Ambil HTML halaman (untuk signature provider) lintas engine."""
+    try:
+        if kancil._engine_name == "static":
+            pg = kancil.engine.page
+            dom = getattr(pg, "dom", None)
+            if dom is not None:
+                from .dom import outer_html as _oh
+                return _oh(dom, limit=limit)
+            return ""
+        r = kancil.evaluate(
+            "(function(){try{return document.documentElement.outerHTML"
+            ".slice(0,%d)}catch(e){return \"\"}})()" % limit)
+        if r.get("success") and r.get("result"):
+            return str(r["result"])
+    except Exception:
+        pass
+    return ""
+
+
 def check(kancil):
-    """Cek apakah halaman stuck. -> detect() + url."""
+    """Cek apakah halaman stuck. -> detect() + provider + url."""
+    from . import providers as _pv
     url = ""
     try:
         tabs = kancil.tabs().get("tabs", [])
@@ -105,7 +126,81 @@ def check(kancil):
     d = detect(page_text(kancil), url)
     d["url"] = url
     d["success"] = True
+    if d.get("stuck"):
+        html = page_html(kancil)
+        prov = _pv.detect_provider(body=html)
+        d["provider"] = prov["provider"]
+        d["provider_confidence"] = prov["confidence"]
+        if prov["provider"]:
+            d["provider_hint"] = prov["hint"]
+            d["provider_solvable"] = prov["solvable"]
     return d
+
+
+TURNSTILE_JS = """(function(){
+  var out = [];
+  var ifs = document.querySelectorAll('iframe');
+  for (var i = 0; i < ifs.length; i++) {
+    var f = ifs[i], s = (f.src || '').toLowerCase();
+    if (s.indexOf('turnstile') >= 0 ||
+        s.indexOf('challenges.cloudflare.com') >= 0) {
+      var r = f.getBoundingClientRect();
+      if (r.width > 10 && r.height > 10)
+        out.push({x: r.x + r.width/2, y: r.y + r.height/2});
+    }
+  }
+  if (!out.length) {
+    var els = document.querySelectorAll(
+      '.cf-turnstile iframe, div.cf-turnstile');
+    for (var j = 0; j < els.length; j++) {
+      var b = els[j].getBoundingClientRect();
+      if (b.width > 10 && b.height > 10)
+        out.push({x: b.x + b.width/2, y: b.y + b.height/2});
+    }
+  }
+  return JSON.stringify(out);
+})()"""
+
+
+def solve_turnstile(kancil, timeout=25):
+    """Klik checkbox Cloudflare Turnstile (webview).
+
+    BUKAN bypass — sama seperti klik manusia: Turnstile checkbox pada
+    umumnya lolos sekali klik. Gagal jujur bila tidak ada widget /
+    challenge tidak hilang.
+    """
+    import time as _t
+    if kancil._engine_name != "webview":
+        return {"success": False, "solved": False,
+                "errors": ["solve_turnstile butuh engine webview"]}
+    r = kancil.evaluate(TURNSTILE_JS)
+    boxes = []
+    if r.get("success") and r.get("result"):
+        try:
+            import json as _j
+            boxes = _j.loads(str(r["result"])) or []
+        except Exception:
+            boxes = []
+    if not boxes:
+        return {"success": False, "solved": False,
+                "errors": ["widget turnstile tidak ketemu"]}
+    b = boxes[0]
+    t = kancil.touch("tap", x=b["x"], y=b["y"], human=True)
+    if not t.get("success"):
+        return {"success": False, "solved": False,
+                "errors": ["tap gagal: %s"
+                           % str(t.get("errors"))[:120]]}
+    # tunggu challenge hilang
+    end = _t.time() + timeout
+    while _t.time() < end:
+        _t.sleep(2.0)
+        c = check(kancil)
+        kinds = c.get("kinds") or []
+        if "captcha" not in kinds and "challenge" not in kinds:
+            return {"success": True, "solved": True,
+                    "clicked_at": {"x": b["x"], "y": b["y"]}}
+    return {"success": True, "solved": False,
+            "note": "challenge masih ada setelah %ds" % timeout}
 
 
 def resolve(kancil, kind=None):
@@ -146,10 +241,31 @@ def resolve(kancil, kind=None):
         return {"success": True, "resolved": gone, "kind": kind,
                 "action_taken": "tunggu 4 dtk + cek ulang",
                 "needs_human": not gone}
-    # captcha / login_wall / paywall: jangan ditebak
+    # captcha / login_wall / paywall: jangan ditebak — kecuali
+    # Turnstile Cloudflare yang memang cuma butuh sekali klik.
+    if kind == "captcha" and c.get("provider") == "cloudflare" and \
+            c.get("provider_solvable") == "turnstile":
+        s = solve_turnstile(kancil)
+        if s.get("solved"):
+            try:
+                from . import clearance as _cl
+                host = _cl.host_of(c.get("url", ""))
+                if host:
+                    _cl.save_from_kancil(kancil, host)
+            except Exception:
+                pass
+            return {"success": True, "resolved": True, "kind": kind,
+                    "action_taken": "klik checkbox turnstile",
+                    "needs_human": False,
+                    "provider": "cloudflare"}
+        # jatuh ke bawah: lapor manusia
+        c["_turnstile_note"] = s.get("note") or str(
+            s.get("errors") or [""])[0][:120]
     return {"success": True, "resolved": False, "kind": kind,
             "action_taken": "dilaporkan (tidak di-auto-handle)",
             "needs_human": True,
+            "provider": c.get("provider"),
+            "provider_hint": c.get("provider_hint", ""),
             "hint": {"captcha": "selesaikan captcha manual di HP, lalu "
                                 "lanjutkan autopilot (resume checkpoint)",
                      "login_wall": "login manual sekali di app, atau "

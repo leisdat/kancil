@@ -153,6 +153,14 @@ def run(kancil, plan, checkpoint_path=None, resume=False, variables=None,
         # 3) eksekusi + retry/backoff + verify
         payload = {"action": action}
         payload.update(params)
+        # clearance: sebelum open, inject cf_clearance cache bila ada
+        if plan.get("clearance") and action == "open" and params.get("url"):
+            try:
+                from . import clearance as _cl
+                _cl.inject_to_kancil(
+                    kancil, url=params["url"])
+            except Exception:
+                pass
         ok, last = False, None
         for attempt in range(retries + 1):
             last = kancil.tool(payload)

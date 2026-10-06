@@ -136,7 +136,7 @@ class TestAgentKeyApi(unittest.TestCase):
         self.assertIn("agent_key", Kancil._TOOL_ACTIONS)
         m = Kancil._action_meta("agent_key")
         self.assertEqual(m["engines"], ["webview"])
-        self.assertEqual(len(Kancil._TOOL_ACTIONS), 138)
+        self.assertEqual(len(Kancil._TOOL_ACTIONS), 141)
 
     def test_show(self):
         from kancil.api import Kancil

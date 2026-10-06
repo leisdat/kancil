@@ -33,6 +33,24 @@
   (`--selector`, `--max`, `--pixels`); tool action.
 - 138 tool actions; 24 test baru (`tests/test_autopilot.py`).
 
+### Added (port SPECTER: deteksi provider anti-bot)
+- **Deteksi provider** (`kancil/providers.py`, signature port dari
+  lingxudr/specter MIT): 8 provider (Cloudflare, hCaptcha, reCAPTCHA,
+  AWS WAF, Akamai, DataDome, Imperva, Arkose) dari header/body/cookie
+  + confidence + evidence. `check_stuck()` kini melampirkan provider,
+  confidence, dan hint spesifik per provider.
+- **Auto-klik Turnstile** (`stuck.solve_turnstile()`): checkbox
+  Cloudflare Turnstile di-klik via `touch tap` human-like di tengah
+  iframe (koordinat CSS px) — bukan bypass, sama seperti klik manusia;
+  lalu tunggu challenge hilang. Otomatis dipakai `resolve_stuck()`
+  untuk captcha Cloudflare; gagal jujur bila widget tak ketemu.
+- **Cache cf_clearance** (`kancil/clearance.py`):
+  `~/.kancil/clearance.json` (0600) per host + TTL 1800 dtk;
+  `clearance_save/load/clear()` + tool actions + CLI
+  `kancil clearance save|load|clear [host]`; autopilot plan dengan
+  `"clearance": true` inject otomatis sebelum step `open`.
+- 141 tool actions; 21 test baru (`tests/test_specter_port.py`).
+
 ### Added (8 saran fitur audit, semua dibangun)
 - **MCP server** (`kancil mcp [--engine]`): 130 tool actions sebagai MCP
   tools via stdio JSON-RPC (initialize, tools/list, tools/call, ping).

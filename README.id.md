@@ -247,6 +247,13 @@ JavaScript, dan network log per tab — tanpa perlu agent. Tombol fullscreen vid
 > Watchdog + stuck detector jalan otomatis tiap step. Stuck detector
 > kenali captcha / login-wall / consent / paywall / challenge Cloudflare:
 > consent di-auto-klik, captcha pause + lapor (nggak ditebak).
+> **Deteksi provider** (signature port dari lingxudr/specter, MIT):
+> kenali Cloudflare / hCaptcha / reCAPTCHA / AWS WAF / Akamai / DataDome /
+> Imperva / Arkose dari header/body/cookie — hint spesifik per provider.
+> Checkbox Turnstile Cloudflare di-auto-klik (sama kayak klik manusia);
+> cookie `cf_clearance` di-cache per host + TTL (`kancil clearance
+> save|load|clear`), autopilot inject otomatis bila plan pakai
+> `"clearance": true`.
 > `kancil session-replay flow.jsonl --var query=x` — rekam sekali, replay
 > dengan input beda. `kancil scroll-until "teks"` — scroll sampai ketemu
 > atau konten habis (feed infinite).

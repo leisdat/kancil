@@ -2194,6 +2194,9 @@ class Kancil:
         "resolve_stuck": "{resolved, needs_human}",
         "run_plan": "{steps_ran, failed[]}",
         "vault_restore": "{data, restored}",
+        "clearance_save": "{host, cookies[]}",
+        "clearance_load": "{host, injected[]}",
+        "clearance_clear": "{host}",
         "session_export": "{path, cookie_origins, storage_origins}",
         "session_import": "{cookies_loaded, storage_injected[]}",
         "session_record_start": "{path}",
@@ -2898,6 +2901,23 @@ class Kancil:
         """
         return self.vault_load(name, password=password, restore=True)
 
+    # ---------- clearance cache (cf_clearance per host + TTL) ----------
+    def clearance_save(self, host=None):
+        """Simpan cookie clearance (cf_clearance/__cf_bm) host ini."""
+        from . import clearance as _cl
+        return _cl.save_from_kancil(self, host)
+
+    def clearance_load(self, host=None, url=None):
+        """Inject cookie clearance cache bila masih fresh."""
+        from . import clearance as _cl
+        return _cl.inject_to_kancil(self, host, url)
+
+    def clearance_clear(self, host=None):
+        """Hapus cache clearance (satu host / semua)."""
+        from . import clearance as _cl
+        _cl.clear(host)
+        return {"success": True, "host": host or "all"}
+
     # ---------- autopilot (#3) ----------
     def run_plan(self, plan, checkpoint_path=None, resume=False,
                  variables=None):
@@ -3161,6 +3181,10 @@ Kancil._TOOL_ACTIONS = {
         password=p.get("password")),
     "vault_restore": lambda s, p: s.restore_vault(
         p.get("name", "default"), password=p.get("password")),
+    "clearance_save": lambda s, p: s.clearance_save(host=p.get("host")),
+    "clearance_load": lambda s, p: s.clearance_load(host=p.get("host"),
+                                                   url=p.get("url")),
+    "clearance_clear": lambda s, p: s.clearance_clear(host=p.get("host")),
     "vault_load": lambda s, p: s.vault_load(
         p.get("name", "default"), password=p.get("password"),
         restore=bool(p.get("restore"))),

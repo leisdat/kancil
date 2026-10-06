@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-3.14.0-brightgreen" alt="version">
-  <img src="https://img.shields.io/badge/tests-444%20unit-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/tests-465%20unit-brightgreen" alt="tests">
   <img src="https://img.shields.io/badge/size-%7E100%20KB-blue" alt="size">
   <img src="https://img.shields.io/badge/dependencies-0%20required-blue" alt="zero required deps">
   <img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="python">
@@ -158,6 +158,16 @@ watchdog and stuck detector run automatically before every step.
 paywall / Cloudflare challenge from page text. Consent banners are
 auto-clicked; captchas pause the run with a human hint instead of being
 guessed (`check_stuck` / `resolve_stuck`).
+
+**🛡️ Provider detection** (signatures ported from
+[lingxudr/specter](https://github.com/lingxudr/specter), MIT) — identifies
+which anti-bot provider guards a page (Cloudflare, hCaptcha, reCAPTCHA,
+AWS WAF, Akamai, DataDome, Imperva, Arkose) from headers/body/cookies,
+so the stuck detector gives provider-specific hints instead of a generic
+"captcha". Cloudflare Turnstile checkboxes are auto-clicked (same as a
+human click); `cf_clearance` cookies are cached per host with TTL
+(`kancil clearance save|load|clear`) and auto-injected by autopilot
+plans with `"clearance": true`.
 
 **📜 Parameterized replay** — `kancil session-replay flow.jsonl --var
 query=kancil`: record once, replay with different inputs.
